@@ -290,7 +290,7 @@ if (
   };
   defaultOptions.locale = {
     /** @type {string} */
-    value: typeof navigator !== "undefined" ? navigator.language : "en-US",
+    value:  "es-MX", //typeof navigator !== "undefined" ? navigator.language :
     kind: OptionKind.VIEWER,
   };
   defaultOptions.sandboxBundleSrc = {
