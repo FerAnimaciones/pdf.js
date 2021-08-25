@@ -429,5 +429,18 @@ See https://github.com/adobe-type-tools/cmap-resources
 
     </div> <!-- outerContainer -->
     <div id="printContainer"></div>
+    <script type="text/javascript">
+    const urlParams = new URLSearchParams(window.location.search);
+    if(urlParams.get("print")=="false"){
+      document.getElementById("print").hidden = true;
+    }
+    if(urlParams.get("download")=="false"){
+      document.getElementById("download").hidden = true;
+      document.getElementById("openFile").hidden = true;
+    }
+    window.addEventListener('load', function () {
+      PDFViewerApplication.preferences.set('pdfBugEnabled', true);
+    })
+    </script>
   </body>
 </html>
