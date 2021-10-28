@@ -76,6 +76,7 @@ import {
   createWrapper,
   fixDimensions,
   fixTextIndent,
+  fixURL,
   isPrintOnly,
   layoutClass,
   layoutNode,
@@ -100,6 +101,7 @@ import {
 } from "./utils.js";
 import { stringToBytes, Util, warn } from "../../shared/util.js";
 import { getMetrics } from "./fonts.js";
+import { recoverJsURL } from "../core_utils.js";
 import { searchNode } from "./som.js";
 
 const TEMPLATE_NS_ID = NamespaceIds.template.id;
@@ -122,6 +124,31 @@ const MAX_EMPTY_PAGES = 3;
 const DEFAULT_TAB_INDEX = 5000;
 
 const HEADING_PATTERN = /^H(\d+)$/;
+
+// Allowed mime types for images
+const MIMES = new Set([
+  "image/gif",
+  "image/jpeg",
+  "image/jpg",
+  "image/pjpeg",
+  "image/png",
+  "image/apng",
+  "image/x-png",
+  "image/bmp",
+  "image/x-ms-bmp",
+  "image/tiff",
+  "image/tif",
+  "application/octet-stream",
+]);
+
+const IMAGES_HEADERS = [
+  [[0x42, 0x4d], "image/bmp"],
+  [[0xff, 0xd8, 0xff], "image/jpeg"],
+  [[0x49, 0x49, 0x2a, 0x00], "image/tiff"],
+  [[0x4d, 0x4d, 0x00, 0x2a], "image/tiff"],
+  [[0x47, 0x49, 0x46, 0x38, 0x39, 0x61], "image/gif"],
+  [[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], "image/png"],
+];
 
 function getBorderDims(node) {
   if (!node || !node.border) {
@@ -657,7 +684,7 @@ class Barcode extends XFAObject {
           "shift-jis",
           "ucs-2",
           "utf-16",
-        ].includes(k) || k.match(/iso-8859-[0-9]{2}/),
+        ].includes(k) || k.match(/iso-8859-\d{2}/),
     });
     this.checksum = getStringOption(attributes.checksum, [
       "none",
@@ -1042,7 +1069,10 @@ class Button extends XFAObject {
 
   [$toHTML](availableSpace) {
     // TODO: highlight.
-    return HTMLResult.success({
+
+    const parent = this[$getParent]();
+    const grandpa = parent[$getParent]();
+    const htmlButton = {
       name: "button",
       attributes: {
         id: this[$uid],
@@ -1050,7 +1080,37 @@ class Button extends XFAObject {
         style: {},
       },
       children: [],
-    });
+    };
+
+    for (const event of grandpa.event.children) {
+      // if (true) break;
+      if (event.activity !== "click" || !event.script) {
+        continue;
+      }
+      const jsURL = recoverJsURL(event.script[$content]);
+      if (!jsURL) {
+        continue;
+      }
+      const href = fixURL(jsURL.url);
+      if (!href) {
+        continue;
+      }
+
+      // we've an url so generate a <a>
+      htmlButton.children.push({
+        name: "a",
+        attributes: {
+          id: "link" + this[$uid],
+          href,
+          newWindow: jsURL.newWindow,
+          class: ["xfaLink"],
+          style: {},
+        },
+        children: [],
+      });
+    }
+
+    return HTMLResult.success(htmlButton);
   }
 }
 
@@ -1265,8 +1325,8 @@ class CheckButton extends XFAObject {
         field.items.children[0][$toHTML]().html) ||
       [];
     const exportedValue = {
-      on: (items[0] || "on").toString(),
-      off: (items[1] || "off").toString(),
+      on: (items[0] !== undefined ? items[0] : "on").toString(),
+      off: (items[1] !== undefined ? items[1] : "off").toString(),
     };
 
     const value = (field.value && field.value[$text]()) || "off";
@@ -1296,6 +1356,7 @@ class CheckButton extends XFAObject {
         type,
         checked,
         xfaOn: exportedValue.on,
+        xfaOff: exportedValue.off,
         "aria-label": ariaLabel(field),
       },
     };
@@ -2872,7 +2933,12 @@ class Field extends XFAObject {
       ui.attributes.style = Object.create(null);
     }
 
+    let aElement = null;
+
     if (this.ui.button) {
+      if (ui.children.length === 1) {
+        [aElement] = ui.children.splice(0, 1);
+      }
       Object.assign(ui.attributes.style, borderStyle);
     } else {
       Object.assign(style, borderStyle);
@@ -2928,6 +2994,10 @@ class Field extends XFAObject {
       } else {
         ui.children[0].attributes.style.height = "100%";
       }
+    }
+
+    if (aElement) {
+      ui.children.push(aElement);
     }
 
     if (!caption) {
@@ -3320,6 +3390,10 @@ class Image extends StringObject {
   }
 
   [$toHTML]() {
+    if (this.contentType && !MIMES.has(this.contentType.toLowerCase())) {
+      return HTMLResult.EMPTY;
+    }
+
     let buffer =
       this[$globalData].images && this[$globalData].images.get(this.href);
     if (!buffer && (this.href || !this[$content])) {
@@ -3334,6 +3408,21 @@ class Image extends StringObject {
 
     if (!buffer) {
       return HTMLResult.EMPTY;
+    }
+
+    if (!this.contentType) {
+      for (const [header, type] of IMAGES_HEADERS) {
+        if (
+          buffer.length > header.length &&
+          header.every((x, i) => x === buffer[i])
+        ) {
+          this.contentType = type;
+          break;
+        }
+      }
+      if (!this.contentType) {
+        return HTMLResult.EMPTY;
+      }
     }
 
     // TODO: Firefox doesn't support natively tiff (and tif) format.
@@ -4842,12 +4931,6 @@ class Subform extends XFAObject {
       return false;
     }
 
-    const contentArea = this[$getTemplateRoot]()[$extra].currentContentArea;
-
-    if (this.overflow && this.overflow[$getExtra]().target === contentArea) {
-      return false;
-    }
-
     if (this[$extra]._isSplittable !== undefined) {
       return this[$extra]._isSplittable;
     }
@@ -4981,17 +5064,7 @@ class Subform extends XFAObject {
     });
 
     const root = this[$getTemplateRoot]();
-    const currentContentArea = root[$extra].currentContentArea;
     const savedNoLayoutFailure = root[$extra].noLayoutFailure;
-
-    if (this.overflow) {
-      // In case of overflow in the current content area,
-      // elements must be kept in this subform so it implies
-      // to have no errors on layout failures.
-      root[$extra].noLayoutFailure =
-        root[$extra].noLayoutFailure ||
-        this.overflow[$getExtra]().target === currentContentArea;
-    }
 
     const isSplittable = this[$isSplittable]();
     if (!isSplittable) {
@@ -5273,7 +5346,7 @@ class Submit extends XFAObject {
           "shift-jis",
           "ucs-2",
           "utf-16",
-        ].includes(k) || k.match(/iso-8859-[0-9]{2}/),
+        ].includes(k) || k.match(/iso-8859-\d{2}/),
     });
     this.use = attributes.use || "";
     this.usehref = attributes.usehref || "";
@@ -5528,6 +5601,8 @@ class Template extends XFAObject {
 
           flush(i);
 
+          const currentIndex = i;
+
           i = Infinity;
           if (target instanceof PageArea) {
             // We must stop the contentAreas filling and go to the next page.
@@ -5535,9 +5610,15 @@ class Template extends XFAObject {
           } else if (target instanceof ContentArea) {
             const index = contentAreas.findIndex(e => e === target);
             if (index !== -1) {
-              // In the next loop iteration `i` will be incremented, note the
-              // `continue` just below, hence we need to subtract one here.
-              i = index - 1;
+              if (index > currentIndex) {
+                // In the next loop iteration `i` will be incremented, note the
+                // `continue` just below, hence we need to subtract one here.
+                i = index - 1;
+              } else {
+                // The targetted contentArea has already been filled
+                // so create a new page.
+                startIndex = index;
+              }
             } else {
               targetPageArea = target[$getParent]();
               startIndex = targetPageArea.contentArea.children.findIndex(

@@ -14,7 +14,7 @@
  */
 
 /**
- * @typedef {Object} TextHighlighter
+ * @typedef {Object} TextHighlighterOptions
  * @property {PDFFindController} findController
  * @property {EventBus} eventBus - The application event bus.
  * @property {number} pageIndex - The page index.
@@ -25,6 +25,9 @@
  * either the text layer or XFA layer depending on the type of document.
  */
 class TextHighlighter {
+  /**
+   * @param {TextHighlighterOptions} options
+   */
   constructor({ findController, eventBus, pageIndex }) {
     this.findController = findController;
     this.matches = [];
@@ -167,7 +170,7 @@ class TextHighlighter {
 
     function appendTextToDiv(divIdx, fromOffset, toOffset, className) {
       let div = textDivs[divIdx];
-      if (div.nodeType === 3) {
+      if (div.nodeType === Node.TEXT_NODE) {
         const span = document.createElement("span");
         div.parentNode.insertBefore(span, div);
         span.appendChild(div);

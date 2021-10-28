@@ -144,8 +144,9 @@ class PDFThumbnailViewer {
     }
     this._pagesRotation = rotation;
 
-    for (let i = 0, ii = this._thumbnails.length; i < ii; i++) {
-      this._thumbnails[i].update(rotation);
+    const updateArgs = { rotation };
+    for (const thumbnail of this._thumbnails) {
+      thumbnail.update(updateArgs);
     }
   }
 
@@ -294,12 +295,22 @@ class PDFThumbnailViewer {
     return promise;
   }
 
+  #getScrollAhead(visible) {
+    if (visible.first?.id === 1) {
+      return true;
+    } else if (visible.last?.id === this._thumbnails.length) {
+      return false;
+    }
+    return this.scroll.down;
+  }
+
   forceRendering() {
     const visibleThumbs = this._getVisibleThumbs();
+    const scrollAhead = this.#getScrollAhead(visibleThumbs);
     const thumbView = this.renderingQueue.getHighestPriority(
       visibleThumbs,
       this._thumbnails,
-      this.scroll.down
+      scrollAhead
     );
     if (thumbView) {
       this._ensurePdfPageLoaded(thumbView).then(() => {

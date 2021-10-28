@@ -17,18 +17,20 @@ import { isNodeJS } from "../../src/shared/is_node.js";
 import { XFAFactory } from "../../src/core/xfa/factory.js";
 
 describe("XFAFactory", function () {
-  function searchHtmlNode(root, name, value, byAttributes = false) {
+  function searchHtmlNode(root, name, value, byAttributes = false, nth = [0]) {
     if (
       (!byAttributes && root[name] === value) ||
       (byAttributes && root.attributes && root.attributes[name] === value)
     ) {
-      return root;
+      if (nth[0]-- === 0) {
+        return root;
+      }
     }
     if (!root.children) {
       return null;
     }
     for (const child of root.children) {
-      const node = searchHtmlNode(child, name, value, byAttributes);
+      const node = searchHtmlNode(child, name, value, byAttributes, nth);
       if (node) {
         return node;
       }
@@ -84,7 +86,7 @@ describe("XFAFactory", function () {
       const factory = new XFAFactory({ "xdp:xdp": xml });
       factory.setFonts([]);
 
-      expect(factory.numberPages).toEqual(2);
+      expect(factory.numPages).toEqual(2);
 
       const pages = factory.getPages();
       const page1 = pages.children[0];
@@ -172,7 +174,7 @@ describe("XFAFactory", function () {
       `;
       const factory = new XFAFactory({ "xdp:xdp": xml });
 
-      expect(factory.numberPages).toEqual(1);
+      expect(factory.numPages).toEqual(1);
 
       const pages = factory.getPages();
       const field = searchHtmlNode(pages, "name", "img");
@@ -206,7 +208,7 @@ describe("XFAFactory", function () {
       `;
       const factory = new XFAFactory({ "xdp:xdp": xml });
 
-      expect(factory.numberPages).toEqual(1);
+      expect(factory.numPages).toEqual(1);
 
       const pages = factory.getPages();
       const page1 = pages.children[0];
@@ -261,7 +263,7 @@ describe("XFAFactory", function () {
       const factory = new XFAFactory({ "xdp:xdp": xml });
       factory.setFonts([]);
 
-      expect(factory.numberPages).toEqual(1);
+      expect(factory.numPages).toEqual(1);
 
       const pages = factory.getPages();
       const table = searchHtmlNode(
@@ -334,7 +336,7 @@ describe("XFAFactory", function () {
       `;
       const factory = new XFAFactory({ "xdp:xdp": xml });
 
-      expect(factory.numberPages).toEqual(1);
+      expect(factory.numPages).toEqual(1);
 
       const pages = factory.getPages();
       const field = searchHtmlNode(pages, "name", "input");
@@ -376,7 +378,7 @@ describe("XFAFactory", function () {
       `;
       const factory = new XFAFactory({ "xdp:xdp": xml });
 
-      expect(factory.numberPages).toEqual(1);
+      expect(factory.numPages).toEqual(1);
 
       const pages = factory.getPages();
       const field = searchHtmlNode(pages, "name", "input");
@@ -418,7 +420,7 @@ describe("XFAFactory", function () {
       `;
       const factory = new XFAFactory({ "xdp:xdp": xml });
 
-      expect(factory.numberPages).toEqual(1);
+      expect(factory.numPages).toEqual(1);
 
       const pages = factory.getPages();
       const field = searchHtmlNode(pages, "name", "input");
@@ -461,7 +463,7 @@ describe("XFAFactory", function () {
       `;
       const factory = new XFAFactory({ "xdp:xdp": xml });
 
-      expect(factory.numberPages).toEqual(1);
+      expect(factory.numPages).toEqual(1);
 
       const pages = factory.getPages();
       const field1 = searchHtmlNode(pages, "name", "input");
@@ -515,11 +517,133 @@ describe("XFAFactory", function () {
     `;
     const factory = new XFAFactory({ "xdp:xdp": xml });
 
-    expect(factory.numberPages).toEqual(1);
+    expect(factory.numPages).toEqual(1);
 
     const pages = factory.getPages();
     const field1 = searchHtmlNode(pages, "name", "input");
     expect(field1).not.toEqual(null);
     expect(field1.attributes.value).toEqual("123");
+  });
+
+  it("should parse URLs correctly", function () {
+    function getXml(href) {
+      return `
+<?xml version="1.0"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+  <template xmlns="http://www.xfa.org/schema/xfa-template/3.3">
+    <subform name="root" mergeMode="matchTemplate">
+      <pageSet>
+        <pageArea>
+          <contentArea x="0pt" w="456pt" h="789pt"/>
+          <medium stock="default" short="456pt" long="789pt"/>
+          <draw name="url" y="5.928mm" x="128.388mm" w="71.237mm" h="9.528mm">
+            <value>
+              <exData contentType="text/html">
+                <body xmlns="http://www.w3.org/1999/xhtml">
+                  <a href="${href}">${href}</a>
+                </body>
+              </exData>
+            </value>
+          </draw>
+        </pageArea>
+      </pageSet>
+    </subform>
+  </template>
+  <xfa:datasets xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/">
+    <xfa:data>
+    </xfa:data>
+  </xfa:datasets>
+</xdp:xdp>
+      `;
+    }
+    let factory, pages, a;
+
+    // A valid, and complete, URL.
+    factory = new XFAFactory({ "xdp:xdp": getXml("https://www.example.com/") });
+    expect(factory.numPages).toEqual(1);
+    pages = factory.getPages();
+    a = searchHtmlNode(pages, "name", "a");
+    expect(a.value).toEqual("https://www.example.com/");
+    expect(a.attributes.href).toEqual("https://www.example.com/");
+
+    // A valid, but incomplete, URL.
+    factory = new XFAFactory({ "xdp:xdp": getXml("www.example.com/") });
+    expect(factory.numPages).toEqual(1);
+    pages = factory.getPages();
+    a = searchHtmlNode(pages, "name", "a");
+    expect(a.value).toEqual("www.example.com/");
+    expect(a.attributes.href).toEqual("http://www.example.com/");
+
+    // A valid email-address.
+    factory = new XFAFactory({ "xdp:xdp": getXml("mailto:test@example.com") });
+    expect(factory.numPages).toEqual(1);
+    pages = factory.getPages();
+    a = searchHtmlNode(pages, "name", "a");
+    expect(a.value).toEqual("mailto:test@example.com");
+    expect(a.attributes.href).toEqual("mailto:test@example.com");
+
+    // Not a valid URL.
+    factory = new XFAFactory({ "xdp:xdp": getXml("qwerty/") });
+    expect(factory.numPages).toEqual(1);
+    pages = factory.getPages();
+    a = searchHtmlNode(pages, "name", "a");
+    expect(a.value).toEqual("qwerty/");
+    expect(a.attributes.href).toEqual("");
+  });
+
+  it("should replace button with an URL by a link", function () {
+    const xml = `
+<?xml version="1.0"?>
+<xdp:xdp xmlns:xdp="http://ns.adobe.com/xdp/">
+  <template xmlns="http://www.xfa.org/schema/xfa-template/3.3">
+    <subform name="root" mergeMode="matchTemplate">
+      <pageSet>
+        <pageArea>
+          <contentArea x="123pt" w="456pt" h="789pt"/>
+          <medium stock="default" short="456pt" long="789pt"/>
+        </pageArea>
+      </pageSet>
+      <subform name="first">
+        <field y="1pt" w="11pt" h="22pt" x="2pt">
+          <ui>
+            <button/>
+          </ui>
+          <event activity="click" name="event__click">
+            <script contentType="application/x-javascript">
+              app.launchURL("https://github.com/mozilla/pdf.js", true);
+            </script>
+          </event>
+        </field>
+        <field y="1pt" w="11pt" h="22pt" x="2pt">
+          <ui>
+            <button/>
+          </ui>
+          <event activity="click" name="event__click">
+            <script contentType="application/x-javascript">
+              xfa.host.gotoURL("https://github.com/allizom/pdf.js");
+            </script>
+          </event>
+        </field>
+      </subform>
+    </subform>
+  </template>
+  <xfa:datasets xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/">
+    <xfa:data>
+    </xfa:data>
+  </xfa:datasets>
+</xdp:xdp>
+    `;
+    const factory = new XFAFactory({ "xdp:xdp": xml });
+
+    expect(factory.numPages).toEqual(1);
+
+    const pages = factory.getPages();
+    let a = searchHtmlNode(pages, "name", "a");
+    expect(a.attributes.href).toEqual("https://github.com/mozilla/pdf.js");
+    expect(a.attributes.newWindow).toEqual(true);
+
+    a = searchHtmlNode(pages, "name", "a", false, [1]);
+    expect(a.attributes.href).toEqual("https://github.com/allizom/pdf.js");
+    expect(a.attributes.newWindow).toEqual(false);
   });
 });

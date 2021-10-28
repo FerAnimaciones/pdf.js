@@ -13,6 +13,9 @@
  * limitations under the License.
  */
 
+/** @typedef {import("./interfaces").IPDFLinkService} IPDFLinkService */
+
+import { addLinkAttributes, LinkTarget } from "pdfjs-lib";
 import { parseQueryString } from "./ui_utils.js";
 
 /**
@@ -226,6 +229,21 @@ class PDFLinkService {
   }
 
   /**
+   * Wrapper around the `addLinkAttributes`-function in the API.
+   * @param {HTMLAnchorElement} link
+   * @param {string} url
+   * @param {boolean} [newWindow]
+   */
+  addLinkAttributes(link, url, newWindow = false) {
+    addLinkAttributes(link, {
+      url,
+      target: newWindow ? LinkTarget.BLANK : this.externalLinkTarget,
+      rel: this.externalLinkRel,
+      enabled: this.externalLinkEnabled,
+    });
+  }
+
+  /**
    * @param {string|Array} dest - The PDF destination object.
    * @returns {string} The hyperlink to the PDF object.
    */
@@ -378,15 +396,11 @@ class PDFLinkService {
     // See PDF reference, table 8.45 - Named action
     switch (action) {
       case "GoBack":
-        if (this.pdfHistory) {
-          this.pdfHistory.back();
-        }
+        this.pdfHistory?.back();
         break;
 
       case "GoForward":
-        if (this.pdfHistory) {
-          this.pdfHistory.forward();
-        }
+        this.pdfHistory?.forward();
         break;
 
       case "NextPage":
@@ -516,10 +530,7 @@ function isValidExplicitDestination(dest) {
  */
 class SimpleLinkService {
   constructor() {
-    this.externalLinkTarget = null;
-    this.externalLinkRel = null;
     this.externalLinkEnabled = true;
-    this._ignoreDestinationZoom = false;
   }
 
   /**
@@ -562,6 +573,15 @@ class SimpleLinkService {
    * @param {number|string} val - The page number, or page label.
    */
   goToPage(val) {}
+
+  /**
+   * @param {HTMLAnchorElement} link
+   * @param {string} url
+   * @param {boolean} [newWindow]
+   */
+  addLinkAttributes(link, url, newWindow = false) {
+    addLinkAttributes(link, { url, enabled: this.externalLinkEnabled });
+  }
 
   /**
    * @param dest - The PDF destination object.

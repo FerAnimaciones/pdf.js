@@ -1375,7 +1375,7 @@ gulp.task("jsdoc", function (done) {
 gulp.task("types", function (done) {
   console.log("### Generating TypeScript definitions using `tsc`");
   const args = [
-    "target ES2020",
+    "target ESNext",
     "allowJS",
     "declaration",
     `outDir ${TYPES_DIR}`,
@@ -2348,7 +2348,7 @@ gulp.task("externaltest", function (done) {
 });
 
 gulp.task(
-  "npm-test",
+  "ci-test",
   gulp.series(
     gulp.parallel("lint", "externaltest", "unittestcli"),
     "lint-chromium",

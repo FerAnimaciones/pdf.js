@@ -13,15 +13,17 @@
  * limitations under the License.
  */
 
+/** @typedef {import("./interfaces").IRenderableView} IRenderableView */
+
 import {
   AnnotationMode,
   createPromiseCapability,
+  PixelsPerInch,
   RenderingCancelledException,
   SVGGraphics,
 } from "pdfjs-lib";
 import {
   approximateFraction,
-  CSS_UNITS,
   DEFAULT_SCALE,
   getOutputScale,
   RendererType,
@@ -56,6 +58,7 @@ import { RenderingStates } from "./pdf_rendering_queue.js";
  * @property {IPDFAnnotationLayerFactory} annotationLayerFactory
  * @property {IPDFXfaLayerFactory} xfaLayerFactory
  * @property {IPDFStructTreeLayerFactory} structTreeLayerFactory
+ * @property {Object} [textHighlighterFactory]
  * @property {string} [imageResourcesPath] - Path for image resources, mainly
  *   for annotation icons. Include trailing slash.
  * @property {string} renderer - 'canvas' or 'svg'. The default is 'canvas'.
@@ -146,7 +149,7 @@ class PDFPageView {
 
     const totalRotation = (this.rotation + this.pdfPageRotate) % 360;
     this.viewport = pdfPage.getViewport({
-      scale: this.scale * CSS_UNITS,
+      scale: this.scale * PixelsPerInch.PDF_TO_CSS_UNITS,
       rotation: totalRotation,
     });
     this.reset();
@@ -294,11 +297,27 @@ class PDFPageView {
     div.appendChild(this.loadingIconDiv);
   }
 
-  update(scale, rotation, optionalContentConfigPromise = null) {
+  update({ scale = 0, rotation = null, optionalContentConfigPromise = null }) {
+    if (
+      typeof PDFJSDev !== "undefined" &&
+      PDFJSDev.test("GENERIC") &&
+      typeof arguments[0] !== "object"
+    ) {
+      console.error(
+        "PDFPageView.update called with separate parameters, please use an object instead."
+      );
+
+      this.update({
+        scale: arguments[0],
+        rotation: arguments[1],
+        optionalContentConfigPromise: arguments[2],
+      });
+      return;
+    }
+
     this.scale = scale || this.scale;
-    // The rotation may be zero.
-    if (typeof rotation !== "undefined") {
-      this.rotation = rotation;
+    if (typeof rotation === "number") {
+      this.rotation = rotation; // The rotation may be zero.
     }
     if (optionalContentConfigPromise instanceof Promise) {
       this._optionalContentConfigPromise = optionalContentConfigPromise;
@@ -310,7 +329,7 @@ class PDFPageView {
 
     const totalRotation = (this.rotation + this.pdfPageRotate) % 360;
     this.viewport = this.viewport.clone({
-      scale: this.scale * CSS_UNITS,
+      scale: this.scale * PixelsPerInch.PDF_TO_CSS_UNITS,
       rotation: totalRotation,
     });
 
@@ -656,7 +675,8 @@ class PDFPageView {
             this.l10n,
             /* enableScripting = */ null,
             /* hasJSActionsPromise = */ null,
-            /* mouseState = */ null
+            /* mouseState = */ null,
+            /* fieldObjectsPromise = */ null
           );
       }
       this._renderAnnotationLayer();
@@ -755,7 +775,9 @@ class PDFPageView {
     this.outputScale = outputScale;
 
     if (this.useOnlyCssZoom) {
-      const actualSizeViewport = viewport.clone({ scale: CSS_UNITS });
+      const actualSizeViewport = viewport.clone({
+        scale: PixelsPerInch.PDF_TO_CSS_UNITS,
+      });
       // Use a scale that makes the canvas have the originally intended size
       // of the page.
       outputScale.sx *= actualSizeViewport.width / viewport.width;
@@ -809,7 +831,7 @@ class PDFPageView {
     renderTask.promise.then(
       function () {
         showCanvas();
-        renderCapability.resolve(undefined);
+        renderCapability.resolve();
       },
       function (error) {
         showCanvas();
@@ -844,10 +866,12 @@ class PDFPageView {
     };
 
     const pdfPage = this.pdfPage;
-    const actualSizeViewport = this.viewport.clone({ scale: CSS_UNITS });
+    const actualSizeViewport = this.viewport.clone({
+      scale: PixelsPerInch.PDF_TO_CSS_UNITS,
+    });
     const promise = pdfPage
       .getOperatorList({
-        annotationMode: this._annotatationMode,
+        annotationMode: this._annotationMode,
       })
       .then(opList => {
         ensureNotCancelled();

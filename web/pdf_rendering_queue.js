@@ -33,6 +33,7 @@ class PDFRenderingQueue {
     this.pdfThumbnailViewer = null;
     this.onIdle = null;
     this.highestPriorityPage = null;
+    /** @type {number} */
     this.idleTimeout = null;
     this.printing = false;
     this.isThumbnailViewEnabled = false;
@@ -81,10 +82,11 @@ class PDFRenderingQueue {
       return;
     }
     // No pages needed rendering, so check thumbnails.
-    if (this.pdfThumbnailViewer && this.isThumbnailViewEnabled) {
-      if (this.pdfThumbnailViewer.forceRendering()) {
-        return;
-      }
+    if (
+      this.isThumbnailViewEnabled &&
+      this.pdfThumbnailViewer?.forceRendering()
+    ) {
+      return;
     }
 
     if (this.printing) {
@@ -101,8 +103,9 @@ class PDFRenderingQueue {
    * @param {Object} visible
    * @param {Array} views
    * @param {boolean} scrolledDown
+   * @param {boolean} [preRenderExtra]
    */
-  getHighestPriority(visible, views, scrolledDown) {
+  getHighestPriority(visible, views, scrolledDown, preRenderExtra = false) {
     /**
      * The state has changed. Figure out which page has the highest priority to
      * render next (if any).
@@ -124,21 +127,35 @@ class PDFRenderingQueue {
         return view;
       }
     }
+    const firstId = visible.first.id,
+      lastId = visible.last.id;
 
-    // All the visible views have rendered; try to render next/previous pages.
-    if (scrolledDown) {
-      const nextPageIndex = visible.last.id;
-      // IDs start at 1, so no need to add 1.
-      if (views[nextPageIndex] && !this.isViewFinished(views[nextPageIndex])) {
-        return views[nextPageIndex];
+    // All the visible views have rendered; try to handle any "holes" in the
+    // page layout (can happen e.g. with spreadModes at higher zoom levels).
+    if (lastId - firstId > 1) {
+      for (let i = 1, ii = lastId - firstId; i < ii; i++) {
+        const holeId = scrolledDown ? firstId + i : lastId - i,
+          holeView = views[holeId - 1];
+        if (!this.isViewFinished(holeView)) {
+          return holeView;
+        }
       }
-    } else {
-      const previousPageIndex = visible.first.id - 2;
-      if (
-        views[previousPageIndex] &&
-        !this.isViewFinished(views[previousPageIndex])
-      ) {
-        return views[previousPageIndex];
+    }
+
+    // All the visible views have rendered; try to render next/previous page.
+    // (IDs start at 1, so no need to add 1 when `scrolledDown === true`.)
+    let preRenderIndex = scrolledDown ? lastId : firstId - 2;
+    let preRenderView = views[preRenderIndex];
+
+    if (preRenderView && !this.isViewFinished(preRenderView)) {
+      return preRenderView;
+    }
+    if (preRenderExtra) {
+      preRenderIndex += scrolledDown ? 1 : -1;
+      preRenderView = views[preRenderIndex];
+
+      if (preRenderView && !this.isViewFinished(preRenderView)) {
+        return preRenderView;
       }
     }
     // Everything that needs to be rendered has been.

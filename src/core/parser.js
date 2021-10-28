@@ -1116,8 +1116,6 @@ class Lexer {
     }
     if (strBuf.length > 127) {
       warn(`Name token is longer than allowed by the spec: ${strBuf.length}`);
-    } else if (strBuf.length === 0) {
-      warn("Name token is empty.");
     }
     return Name.get(strBuf.join(""));
   }
@@ -1255,7 +1253,7 @@ class Lexer {
         return Cmd.get("}");
       case 0x29: // ')'
         // Consume the current character in order to avoid permanently hanging
-        // the worker thread if `Lexer.getObject` is called from within a loop
+        // the worker thread if `Lexer.getObj` is called from within a loop
         // containing try-catch statements, since we would otherwise attempt
         // to parse the *same* character over and over (fixes issue8061.pdf).
         this.nextChar();
@@ -1264,6 +1262,15 @@ class Lexer {
 
     // Start reading a command.
     let str = String.fromCharCode(ch);
+    // A valid command cannot start with a non-visible ASCII character,
+    // and the next character may be (the start of) a valid command.
+    if (ch < 0x20 || ch > 0x7f) {
+      const nextCh = this.peekChar();
+      if (nextCh >= 0x20 && nextCh <= 0x7f) {
+        this.nextChar();
+        return Cmd.get(str);
+      }
+    }
     const knownCommands = this.knownCommands;
     let knownCommandFound = knownCommands && knownCommands[str] !== undefined;
     while ((ch = this.nextChar()) >= 0 && !specialChars[ch]) {

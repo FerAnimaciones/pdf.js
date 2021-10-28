@@ -463,13 +463,13 @@ function getDocument(src) {
  * @param {Object} source
  * @param {PDFDataRangeTransport} pdfDataRangeTransport
  * @param {string} docId - Unique document ID, used in `MessageHandler`.
- * @returns {Promise} A promise that is resolved when the worker ID of the
- *   `MessageHandler` is known.
+ * @returns {Promise<string>} A promise that is resolved when the worker ID of
+ *   the `MessageHandler` is known.
  * @private
  */
-function _fetchDocument(worker, source, pdfDataRangeTransport, docId) {
+async function _fetchDocument(worker, source, pdfDataRangeTransport, docId) {
   if (worker.destroyed) {
-    return Promise.reject(new Error("Worker was destroyed"));
+    throw new Error("Worker was destroyed");
   }
 
   if (pdfDataRangeTransport) {
@@ -479,8 +479,9 @@ function _fetchDocument(worker, source, pdfDataRangeTransport, docId) {
     source.contentDispositionFilename =
       pdfDataRangeTransport.contentDispositionFilename;
   }
-  return worker.messageHandler
-    .sendWithPromise("GetDocRequest", {
+  const workerId = await worker.messageHandler.sendWithPromise(
+    "GetDocRequest",
+    {
       docId,
       apiVersion:
         typeof PDFJSDev !== "undefined" && !PDFJSDev.test("TESTING")
@@ -508,13 +509,13 @@ function _fetchDocument(worker, source, pdfDataRangeTransport, docId) {
       standardFontDataUrl: source.useWorkerFetch
         ? source.standardFontDataUrl
         : null,
-    })
-    .then(function (workerId) {
-      if (worker.destroyed) {
-        throw new Error("Worker was destroyed");
-      }
-      return workerId;
-    });
+    }
+  );
+
+  if (worker.destroyed) {
+    throw new Error("Worker was destroyed");
+  }
+  return workerId;
 }
 
 /**
@@ -587,19 +588,15 @@ class PDFDocumentLoadingTask {
    * @returns {Promise<void>} A promise that is resolved when destruction is
    *   completed.
    */
-  destroy() {
+  async destroy() {
     this.destroyed = true;
+    await this._transport?.destroy();
 
-    const transportDestroyed = !this._transport
-      ? Promise.resolve()
-      : this._transport.destroy();
-    return transportDestroyed.then(() => {
-      this._transport = null;
-      if (this._worker) {
-        this._worker.destroy();
-        this._worker = null;
-      }
-    });
+    this._transport = null;
+    if (this._worker) {
+      this._worker.destroy();
+      this._worker = null;
+    }
   }
 }
 
@@ -1020,9 +1017,9 @@ class PDFDocumentProxy {
   }
 
   /**
-   * @returns {Promise<Array<Object> | null>} A promise that is resolved with an
-   *   {Array<Object>} containing /AcroForm field data for the JS sandbox,
-   *   or `null` when no field data is present in the PDF file.
+   * @returns {Promise<Object<string, Array<Object>> | null>} A promise that is
+   *   resolved with an {Object} containing /AcroForm field data for the JS
+   *   sandbox, or `null` when no field data is present in the PDF file.
    */
   getFieldObjects() {
     return this._transport.getFieldObjects();
@@ -1308,6 +1305,34 @@ class PDFPageProxy {
         intentArgs.renderingIntent
       );
       this._annotationPromises.set(intentArgs.cacheKey, promise);
+
+      if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
+        promise = promise.then(annotations => {
+          for (const annotation of annotations) {
+            if (annotation.titleObj !== undefined) {
+              Object.defineProperty(annotation, "title", {
+                get() {
+                  deprecated(
+                    "`title`-property on annotation, please use `titleObj` instead."
+                  );
+                  return annotation.titleObj.str;
+                },
+              });
+            }
+            if (annotation.contentsObj !== undefined) {
+              Object.defineProperty(annotation, "contents", {
+                get() {
+                  deprecated(
+                    "`contents`-property on annotation, please use `contentsObj` instead."
+                  );
+                  return annotation.contentsObj.str;
+                },
+              });
+            }
+          }
+          return annotations;
+        });
+      }
     }
     return promise;
   }
@@ -1874,83 +1899,94 @@ class PDFPageProxy {
 class LoopbackPort {
   constructor() {
     this._listeners = [];
-    this._deferred = Promise.resolve(undefined);
+    this._deferred = Promise.resolve();
   }
 
   postMessage(obj, transfers) {
-    function cloneValue(value) {
+    function cloneValue(object) {
+      if (
+        (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) ||
+        globalThis.structuredClone
+      ) {
+        return globalThis.structuredClone(object, transfers);
+      }
+
       // Trying to perform a structured clone close to the spec, including
       // transfers.
-      if (
-        typeof value === "function" ||
-        typeof value === "symbol" ||
-        value instanceof URL
-      ) {
-        throw new Error(
-          `LoopbackPort.postMessage - cannot clone: ${value?.toString()}`
-        );
+      function fallbackCloneValue(value) {
+        if (
+          typeof value === "function" ||
+          typeof value === "symbol" ||
+          value instanceof URL
+        ) {
+          throw new Error(
+            `LoopbackPort.postMessage - cannot clone: ${value?.toString()}`
+          );
+        }
+
+        if (typeof value !== "object" || value === null) {
+          return value;
+        }
+        if (cloned.has(value)) {
+          // already cloned the object
+          return cloned.get(value);
+        }
+        let buffer, result;
+        if ((buffer = value.buffer) && isArrayBuffer(buffer)) {
+          // We found object with ArrayBuffer (typed array).
+          if (transfers?.includes(buffer)) {
+            result = new value.constructor(
+              buffer,
+              value.byteOffset,
+              value.byteLength
+            );
+          } else {
+            result = new value.constructor(value);
+          }
+          cloned.set(value, result);
+          return result;
+        }
+        if (value instanceof Map) {
+          result = new Map();
+          cloned.set(value, result); // Adding to cache now for cyclic references.
+          for (const [key, val] of value) {
+            result.set(key, fallbackCloneValue(val));
+          }
+          return result;
+        }
+        if (value instanceof Set) {
+          result = new Set();
+          cloned.set(value, result); // Adding to cache now for cyclic references.
+          for (const val of value) {
+            result.add(fallbackCloneValue(val));
+          }
+          return result;
+        }
+        result = Array.isArray(value) ? [] : Object.create(null);
+        cloned.set(value, result); // Adding to cache now for cyclic references.
+        // Cloning all value and object properties, however ignoring properties
+        // defined via getter.
+        for (const i in value) {
+          let desc,
+            p = value;
+          while (!(desc = Object.getOwnPropertyDescriptor(p, i))) {
+            p = Object.getPrototypeOf(p);
+          }
+          if (typeof desc.value === "undefined") {
+            continue;
+          }
+          if (typeof desc.value === "function" && !value.hasOwnProperty?.(i)) {
+            continue;
+          }
+          result[i] = fallbackCloneValue(desc.value);
+        }
+        return result;
       }
 
-      if (typeof value !== "object" || value === null) {
-        return value;
-      }
-      if (cloned.has(value)) {
-        // already cloned the object
-        return cloned.get(value);
-      }
-      let buffer, result;
-      if ((buffer = value.buffer) && isArrayBuffer(buffer)) {
-        // We found object with ArrayBuffer (typed array).
-        if (transfers?.includes(buffer)) {
-          result = new value.constructor(
-            buffer,
-            value.byteOffset,
-            value.byteLength
-          );
-        } else {
-          result = new value.constructor(value);
-        }
-        cloned.set(value, result);
-        return result;
-      }
-      if (value instanceof Map) {
-        result = new Map();
-        cloned.set(value, result); // Adding to cache now for cyclic references.
-        for (const [key, val] of value) {
-          result.set(key, cloneValue(val));
-        }
-        return result;
-      }
-      if (value instanceof Set) {
-        result = new Set();
-        cloned.set(value, result); // Adding to cache now for cyclic references.
-        for (const val of value) {
-          result.add(cloneValue(val));
-        }
-        return result;
-      }
-      result = Array.isArray(value) ? [] : Object.create(null);
-      cloned.set(value, result); // Adding to cache now for cyclic references.
-      // Cloning all value and object properties, however ignoring properties
-      // defined via getter.
-      for (const i in value) {
-        let desc,
-          p = value;
-        while (!(desc = Object.getOwnPropertyDescriptor(p, i))) {
-          p = Object.getPrototypeOf(p);
-        }
-        if (typeof desc.value === "undefined") {
-          continue;
-        }
-        if (typeof desc.value === "function" && !value.hasOwnProperty?.(i)) {
-          continue;
-        }
-        result[i] = cloneValue(desc.value);
-      }
-      return result;
+      const cloned = new WeakMap();
+      return fallbackCloneValue(object);
     }
 
-    const cloned = new WeakMap();
     const event = { data: cloneValue(obj) };
 
     this._deferred.then(() => {
@@ -2483,6 +2519,7 @@ class WorkerTransport {
     Promise.all(waitOn).then(() => {
       this.commonObjs.clear();
       this.fontLoader.clear();
+      this._getFieldObjectsPromise = null;
       this._hasJSActionsPromise = null;
 
       if (this._networkStream) {
@@ -2555,16 +2592,14 @@ class WorkerTransport {
         // If stream or range are disabled, it's our only way to report
         // loading progress.
         if (!fullReader.isStreamingSupported || !fullReader.isRangeSupported) {
-          if (this._lastProgress && loadingTask.onProgress) {
-            loadingTask.onProgress(this._lastProgress);
+          if (this._lastProgress) {
+            loadingTask.onProgress?.(this._lastProgress);
           }
           fullReader.onProgress = evt => {
-            if (loadingTask.onProgress) {
-              loadingTask.onProgress({
-                loaded: evt.loaded,
-                total: evt.total,
-              });
-            }
+            loadingTask.onProgress?.({
+              loaded: evt.loaded,
+              total: evt.total,
+            });
           };
         }
 
@@ -2690,12 +2725,11 @@ class WorkerTransport {
     messageHandler.on("DataLoaded", data => {
       // For consistency: Ensure that progress is always reported when the
       // entire PDF file has been loaded, regardless of how it was fetched.
-      if (loadingTask.onProgress) {
-        loadingTask.onProgress({
-          loaded: data.length,
-          total: data.length,
-        });
-      }
+      loadingTask.onProgress?.({
+        loaded: data.length,
+        total: data.length,
+      });
+
       this.downloadInfoCapability.resolve(data);
     });
 
@@ -2774,13 +2808,13 @@ class WorkerTransport {
     messageHandler.on("obj", data => {
       if (this.destroyed) {
         // Ignore any pending requests if the worker was terminated.
-        return undefined;
+        return;
       }
 
       const [id, pageIndex, type, imageData] = data;
       const pageProxy = this.pageCache[pageIndex];
       if (pageProxy.objs.has(id)) {
-        return undefined;
+        return;
       }
 
       switch (type) {
@@ -2799,20 +2833,16 @@ class WorkerTransport {
         default:
           throw new Error(`Got unknown object type ${type}`);
       }
-      return undefined;
     });
 
     messageHandler.on("DocProgress", data => {
       if (this.destroyed) {
         return; // Ignore any pending requests if the worker was terminated.
       }
-
-      if (loadingTask.onProgress) {
-        loadingTask.onProgress({
-          loaded: data.loaded,
-          total: data.total,
-        });
-      }
+      loadingTask.onProgress?.({
+        loaded: data.loaded,
+        total: data.total,
+      });
     });
 
     messageHandler.on(
@@ -2853,9 +2883,7 @@ class WorkerTransport {
     if (this.destroyed) {
       return; // Ignore any pending requests if the worker was terminated.
     }
-    if (this.loadingTask.onUnsupportedFeature) {
-      this.loadingTask.onUnsupportedFeature(featureId);
-    }
+    this.loadingTask.onUnsupportedFeature?.(featureId);
   }
 
   getData() {
@@ -2898,13 +2926,9 @@ class WorkerTransport {
   }
 
   getPageIndex(ref) {
-    return this.messageHandler
-      .sendWithPromise("GetPageIndex", {
-        ref,
-      })
-      .catch(function (reason) {
-        return Promise.reject(new Error(reason));
-      });
+    return this.messageHandler.sendWithPromise("GetPageIndex", {
+      ref,
+    });
   }
 
   getAnnotations(pageIndex, intent) {
@@ -2928,7 +2952,8 @@ class WorkerTransport {
   }
 
   getFieldObjects() {
-    return this.messageHandler.sendWithPromise("GetFieldObjects", null);
+    return (this._getFieldObjectsPromise ||=
+      this.messageHandler.sendWithPromise("GetFieldObjects", null));
   }
 
   hasJSActions() {
@@ -3057,6 +3082,7 @@ class WorkerTransport {
     if (!keepLoadedFonts) {
       this.fontLoader.clear();
     }
+    this._getFieldObjectsPromise = null;
     this._hasJSActionsPromise = null;
   }
 
@@ -3064,6 +3090,7 @@ class WorkerTransport {
     const params = this._params;
     return shadow(this, "loadingParams", {
       disableAutoFetch: params.disableAutoFetch,
+      enableXfa: params.enableXfa,
     });
   }
 }
@@ -3368,9 +3395,11 @@ export {
   getDocument,
   LoopbackPort,
   PDFDataRangeTransport,
+  PDFDocumentLoadingTask,
   PDFDocumentProxy,
   PDFPageProxy,
   PDFWorker,
+  RenderTask,
   setPDFNetworkStreamFactory,
   version,
 };

@@ -13,6 +13,9 @@
  * limitations under the License.
  */
 
+/** @typedef {import("./interfaces").IPDFXfaLayerFactory} IPDFXfaLayerFactory */
+
+import { SimpleLinkService } from "./pdf_link_service.js";
 import { XfaLayer } from "pdfjs-lib";
 
 /**
@@ -20,17 +23,20 @@ import { XfaLayer } from "pdfjs-lib";
  * @property {HTMLDivElement} pageDiv
  * @property {PDFPage} pdfPage
  * @property {AnnotationStorage} [annotationStorage]
+ * @property {IPDFLinkService} linkService
+ * @property {Object} [xfaHtml]
  */
 
 class XfaLayerBuilder {
   /**
    * @param {XfaLayerBuilderOptions} options
    */
-  constructor({ pageDiv, pdfPage, xfaHtml, annotationStorage }) {
+  constructor({ pageDiv, pdfPage, annotationStorage, linkService, xfaHtml }) {
     this.pageDiv = pageDiv;
     this.pdfPage = pdfPage;
-    this.xfaHtml = xfaHtml;
     this.annotationStorage = annotationStorage;
+    this.linkService = linkService;
+    this.xfaHtml = xfaHtml;
 
     this.div = null;
     this._cancelled = false;
@@ -51,6 +57,7 @@ class XfaLayerBuilder {
         xfa: this.xfaHtml,
         page: null,
         annotationStorage: this.annotationStorage,
+        linkService: this.linkService,
         intent,
       };
 
@@ -59,23 +66,25 @@ class XfaLayerBuilder {
       this.pageDiv.appendChild(div);
       parameters.div = div;
 
-      XfaLayer.render(parameters);
-      return Promise.resolve();
+      const result = XfaLayer.render(parameters);
+      return Promise.resolve(result);
     }
 
     // intent === "display"
     return this.pdfPage
       .getXfa()
       .then(xfa => {
-        if (this._cancelled) {
-          return Promise.resolve();
+        if (this._cancelled || !xfa) {
+          return { textDivs: [] };
         }
+
         const parameters = {
           viewport: viewport.clone({ dontFlip: true }),
           div: this.div,
           xfa,
           page: this.pdfPage,
           annotationStorage: this.annotationStorage,
+          linkService: this.linkService,
           intent,
         };
 
@@ -125,6 +134,7 @@ class DefaultXfaLayerFactory {
       pageDiv,
       pdfPage,
       annotationStorage,
+      linkService: new SimpleLinkService(),
       xfaHtml,
     });
   }

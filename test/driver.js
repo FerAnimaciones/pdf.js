@@ -22,13 +22,13 @@ const {
   AnnotationMode,
   getDocument,
   GlobalWorkerOptions,
+  PixelsPerInch,
   renderTextLayer,
   XfaLayer,
 } = pdfjsLib;
 const { SimpleLinkService } = pdfjsViewer;
 
 const WAITING_TIME = 100; // ms
-const PDF_TO_CSS_UNITS = 96.0 / 72.0;
 const CMAP_URL = "/build/generic/web/cmaps/";
 const CMAP_PACKED = true;
 const STANDARD_FONT_DATA_URL = "/build/generic/web/standard_fonts/";
@@ -168,7 +168,7 @@ var rasterizeTextLayer = (function rasterizeTextLayerClosure() {
       foreignObject.appendChild(div);
 
       stylePromise
-        .then(async cssRules => {
+        .then(async ([cssRules]) => {
           style.textContent = cssRules;
 
           // Rendering text layer as HTML.
@@ -251,8 +251,8 @@ var rasterizeAnnotationLayer = (function rasterizeAnnotationLayerClosure() {
 
       // Rendering annotation layer as HTML.
       stylePromise
-        .then(async (common, overrides) => {
-          style.textContent = common + overrides;
+        .then(async ([common, overrides]) => {
+          style.textContent = common + "\n" + overrides;
 
           var annotation_viewport = viewport.clone({ dontFlip: true });
           var parameters = {
@@ -326,7 +326,7 @@ var rasterizeXfaLayer = (function rasterizeXfaLayerClosure() {
       foreignObject.appendChild(div);
 
       stylePromise
-        .then(async cssRules => {
+        .then(async ([cssRules]) => {
           style.textContent = fontRules + "\n" + cssRules;
 
           XfaLayer.render({
@@ -334,6 +334,7 @@ var rasterizeXfaLayer = (function rasterizeXfaLayerClosure() {
             div,
             viewport: viewport.clone({ dontFlip: true }),
             annotationStorage,
+            linkService: new SimpleLinkService(),
             intent: isPrint ? "print" : "display",
           });
 
@@ -519,7 +520,7 @@ var Driver = (function DriverClosure() {
             styleElement: xfaStyleElement,
           });
           loadingTask.promise.then(
-            doc => {
+            async doc => {
               if (task.enableXfa) {
                 task.fontRules = "";
                 for (const rule of xfaStyleElement.sheet.cssRules) {
@@ -530,6 +531,15 @@ var Driver = (function DriverClosure() {
               task.pdfDoc = doc;
               task.optionalContentConfigPromise =
                 doc.getOptionalContentConfig();
+
+              if (task.optionalContent) {
+                const entries = Object.entries(task.optionalContent),
+                  optionalContentConfig =
+                    await task.optionalContentConfigPromise;
+                for (const [id, visible] of entries) {
+                  optionalContentConfig.setVisibility(id, visible);
+                }
+              }
 
               this._nextPage(task, failure);
             },
@@ -646,7 +656,9 @@ var Driver = (function DriverClosure() {
           ctx = this.canvas.getContext("2d", { alpha: false });
           task.pdfDoc.getPage(task.pageNum).then(
             function (page) {
-              var viewport = page.getViewport({ scale: PDF_TO_CSS_UNITS });
+              var viewport = page.getViewport({
+                scale: PixelsPerInch.PDF_TO_CSS_UNITS,
+              });
               self.canvas.width = viewport.width;
               self.canvas.height = viewport.height;
               self._clearCanvas();

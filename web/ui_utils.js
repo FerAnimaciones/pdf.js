@@ -13,9 +13,9 @@
  * limitations under the License.
  */
 
-const CSS_UNITS = 96.0 / 72.0;
 const DEFAULT_SCALE_VALUE = "auto";
 const DEFAULT_SCALE = 1.0;
+const DEFAULT_SCALE_DELTA = 1.1;
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 10.0;
 const UNKNOWN_SCALE = 0;
@@ -57,6 +57,7 @@ const ScrollMode = {
   VERTICAL: 0, // Default value.
   HORIZONTAL: 1,
   WRAPPED: 2,
+  PAGE: 3,
 };
 
 const SpreadMode = {
@@ -285,11 +286,22 @@ function roundToDivide(x, div) {
 }
 
 /**
+ * @typedef {Object} GetPageSizeInchesParameters
+ * @property {number[]} view
+ * @property {number} userUnit
+ * @property {number} rotate
+ */
+
+/**
+ * @typedef {Object} PageSize
+ * @property {number} width - In inches.
+ * @property {number} height - In inches.
+ */
+
+/**
  * Gets the size of the specified page, converted from PDF units to inches.
- * @param {Object} An Object containing the properties: {Array} `view`,
- *   {number} `userUnit`, and {number} `rotate`.
- * @returns {Object} An Object containing the properties: {number} `width`
- *   and {number} `height`, given in inches.
+ * @param {GetPageSizeInchesParameters} params
+ * @returns {PageSize}
  */
 function getPageSizeInches({ view, userUnit, rotate }) {
   const [x1, y1, x2, y2] = view;
@@ -696,42 +708,12 @@ const animationStarted = new Promise(function (resolve) {
 });
 
 /**
- * NOTE: Only used to support various PDF viewer tests in `mozilla-central`.
- */
-function dispatchDOMEvent(eventName, args = null) {
-  if (typeof PDFJSDev !== "undefined" && !PDFJSDev.test("MOZCENTRAL")) {
-    throw new Error("Not implemented: dispatchDOMEvent");
-  }
-  const details = Object.create(null);
-  if (args?.length > 0) {
-    const obj = args[0];
-    for (const key in obj) {
-      const value = obj[key];
-      if (key === "source") {
-        if (value === window || value === document) {
-          return; // No need to re-dispatch (already) global events.
-        }
-        continue; // Ignore the `source` property.
-      }
-      details[key] = value;
-    }
-  }
-  const event = document.createEvent("CustomEvent");
-  event.initCustomEvent(eventName, true, true, details);
-  document.dispatchEvent(event);
-}
-
-/**
  * Simple event bus for an application. Listeners are attached using the `on`
  * and `off` methods. To raise an event, the `dispatch` method shall be used.
  */
 class EventBus {
-  constructor(options) {
+  constructor() {
     this._listeners = Object.create(null);
-
-    if (typeof PDFJSDev === "undefined" || PDFJSDev.test("MOZCENTRAL")) {
-      this._isInAutomation = options?.isInAutomation === true;
-    }
   }
 
   /**
@@ -758,20 +740,15 @@ class EventBus {
     });
   }
 
-  dispatch(eventName) {
+  /**
+   * @param {string} eventName
+   * @param {Object} data
+   */
+  dispatch(eventName, data) {
     const eventListeners = this._listeners[eventName];
     if (!eventListeners || eventListeners.length === 0) {
-      if (
-        (typeof PDFJSDev === "undefined" || PDFJSDev.test("MOZCENTRAL")) &&
-        this._isInAutomation
-      ) {
-        const args = Array.prototype.slice.call(arguments, 1);
-        dispatchDOMEvent(eventName, args);
-      }
       return;
     }
-    // Passing all arguments after the eventName to the listeners.
-    const args = Array.prototype.slice.call(arguments, 1);
     let externalListeners;
     // Making copy of the listeners array in case if it will be modified
     // during dispatch.
@@ -783,21 +760,15 @@ class EventBus {
         (externalListeners ||= []).push(listener);
         continue;
       }
-      listener.apply(null, args);
+      listener(data);
     }
     // Dispatch any "external" listeners *after* the internal ones, to give the
     // viewer components time to handle events and update their state first.
     if (externalListeners) {
       for (const listener of externalListeners) {
-        listener.apply(null, args);
+        listener(data);
       }
       externalListeners = null;
-    }
-    if (
-      (typeof PDFJSDev === "undefined" || PDFJSDev.test("MOZCENTRAL")) &&
-      this._isInAutomation
-    ) {
-      dispatchDOMEvent(eventName, args);
     }
   }
 
@@ -827,6 +798,35 @@ class EventBus {
         return;
       }
     }
+  }
+}
+
+/**
+ * NOTE: Only used to support various PDF viewer tests in `mozilla-central`.
+ */
+class AutomationEventBus extends EventBus {
+  dispatch(eventName, data) {
+    if (typeof PDFJSDev !== "undefined" && !PDFJSDev.test("MOZCENTRAL")) {
+      throw new Error("Not implemented: AutomationEventBus.dispatch");
+    }
+    super.dispatch(eventName, data);
+
+    const details = Object.create(null);
+    if (data) {
+      for (const key in data) {
+        const value = data[key];
+        if (key === "source") {
+          if (value === window || value === document) {
+            return; // No need to re-dispatch (already) global events.
+          }
+          continue; // Ignore the `source` property.
+        }
+        details[key] = value;
+      }
+    }
+    const event = document.createEvent("CustomEvent");
+    event.initCustomEvent(eventName, true, true, details);
+    document.dispatchEvent(event);
   }
 }
 
@@ -953,21 +953,32 @@ function getActiveOrFocusedElement() {
  *       necessary Scroll/Spread modes (since SinglePage, TwoPageLeft,
  *       and TwoPageRight all suggests using non-continuous scrolling).
  * @param {string} mode - The API PageLayout value.
- * @returns {number} A value from {SpreadMode}.
+ * @returns {Object}
  */
-function apiPageLayoutToSpreadMode(layout) {
+function apiPageLayoutToViewerModes(layout) {
+  let scrollMode = ScrollMode.VERTICAL,
+    spreadMode = SpreadMode.NONE;
+
   switch (layout) {
     case "SinglePage":
+      scrollMode = ScrollMode.PAGE;
+      break;
     case "OneColumn":
-      return SpreadMode.NONE;
-    case "TwoColumnLeft":
+      break;
     case "TwoPageLeft":
-      return SpreadMode.ODD;
-    case "TwoColumnRight":
+      scrollMode = ScrollMode.PAGE;
+    /* falls through */
+    case "TwoColumnLeft":
+      spreadMode = SpreadMode.ODD;
+      break;
     case "TwoPageRight":
-      return SpreadMode.EVEN;
+      scrollMode = ScrollMode.PAGE;
+    /* falls through */
+    case "TwoColumnRight":
+      spreadMode = SpreadMode.EVEN;
+      break;
   }
-  return SpreadMode.NONE; // Default value.
+  return { scrollMode, spreadMode };
 }
 
 /**
@@ -996,14 +1007,15 @@ function apiPageModeToSidebarView(mode) {
 
 export {
   animationStarted,
-  apiPageLayoutToSpreadMode,
+  apiPageLayoutToViewerModes,
   apiPageModeToSidebarView,
   approximateFraction,
+  AutomationEventBus,
   AutoPrintRegExp,
   backtrackBeforeAllVisibleElements, // only exported for testing
   binarySearchFirstItem,
-  CSS_UNITS,
   DEFAULT_SCALE,
+  DEFAULT_SCALE_DELTA,
   DEFAULT_SCALE_VALUE,
   EventBus,
   getActiveOrFocusedElement,
