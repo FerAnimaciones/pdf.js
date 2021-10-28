@@ -1,3 +1,10 @@
+# Compilation
+
+```
+$ gulp minified
+```
+
+
 # viewer
 [/web/viewer.html](/web/viewer.html)
 
