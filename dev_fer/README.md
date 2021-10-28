@@ -21,7 +21,7 @@ window.addEventListener('load', function () {
 ```
 
 # app_options.js
-[web\app_options.js](web\app_options.js)
+[web/app_options.js](web/app_options.js)
 
 ```
 defaultOptions.locale = {
