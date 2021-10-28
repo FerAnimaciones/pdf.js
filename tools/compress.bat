@@ -10,5 +10,5 @@ set datetoday=%mydate%_%mytime%
 if not exist "backups" mkdir backups
 if exist %systemname%.rar copy %systemname%.rar "backups/%systemname% %datetoday%".rar
 if exist "%systemname%.rar" del "%systemname%.rar"
-"%ProgramFiles%\WinRAR\Rar.exe" a -ep1 -idq -r -y -rr100p "%systemname%" "%a%"  -x*\node_modules
+"%ProgramFiles%\WinRAR\Rar.exe" a -ep1 -idq -r -y -rr100p "%systemname%.rar" "%a%"  -x*\node_modules
 ::pause
