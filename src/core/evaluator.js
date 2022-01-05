@@ -527,7 +527,11 @@ class PartialEvaluator {
       operatorList.addOp(OPS.beginGroup, [groupOptions]);
     }
 
-    operatorList.addOp(OPS.paintFormXObjectBegin, [matrix, bbox]);
+    // If it's a group, a new canvas will be created that is the size of the
+    // bounding box and translated to the correct position so we don't need to
+    // apply the bounding box to it.
+    const args = group ? [matrix, null] : [matrix, bbox];
+    operatorList.addOp(OPS.paintFormXObjectBegin, args);
 
     return this.getOperatorList({
       stream: xobj,
@@ -576,8 +580,8 @@ class PartialEvaluator {
   }) {
     const dict = image.dict;
     const imageRef = dict.objId;
-    const w = dict.get("Width", "W");
-    const h = dict.get("Height", "H");
+    const w = dict.get("W", "Width");
+    const h = dict.get("H", "Height");
 
     if (!(w && isNum(w)) || !(h && isNum(h))) {
       warn("Image dimensions are missing, or not numbers.");
@@ -600,8 +604,8 @@ class PartialEvaluator {
       operatorList.addOp(OPS.beginMarkedContentProps, ["OC", optionalContent]);
     }
 
-    const imageMask = dict.get("ImageMask", "IM") || false;
-    const interpolate = dict.get("Interpolate", "I");
+    const imageMask = dict.get("IM", "ImageMask") || false;
+    const interpolate = dict.get("I", "Interpolate");
     let imgData, args;
     if (imageMask) {
       // This depends on a tmpCanvas being filled with the
@@ -609,20 +613,17 @@ class PartialEvaluator {
       // data can't be done here. Instead of creating a
       // complete PDFImage, only read the information needed
       // for later.
-
-      const width = dict.get("Width", "W");
-      const height = dict.get("Height", "H");
-      const bitStrideLength = (width + 7) >> 3;
+      const bitStrideLength = (w + 7) >> 3;
       const imgArray = image.getBytes(
-        bitStrideLength * height,
+        bitStrideLength * h,
         /* forceClamped = */ true
       );
-      const decode = dict.getArray("Decode", "D");
+      const decode = dict.getArray("D", "Decode");
 
       imgData = PDFImage.createMask({
         imgArray,
-        width,
-        height,
+        width: w,
+        height: h,
         imageIsFromDecodeStream: image instanceof DecodeStream,
         inverseDecode: !!decode && decode[0] > 0,
         interpolate,
@@ -644,7 +645,7 @@ class PartialEvaluator {
       return;
     }
 
-    const softMask = dict.get("SMask", "SM") || false;
+    const softMask = dict.get("SM", "SMask") || false;
     const mask = dict.get("Mask") || false;
 
     const SMALL_IMAGE_DIMENSIONS = 200;
@@ -1247,8 +1248,7 @@ class PartialEvaluator {
     this.translateFont(preEvaluatedFont)
       .then(translatedFont => {
         if (translatedFont.fontType !== undefined) {
-          const xrefFontStats = xref.stats.fontTypes;
-          xrefFontStats[translatedFont.fontType] = true;
+          xref.stats.addFontType(translatedFont.fontType);
         }
 
         fontCapability.resolve(
@@ -1276,8 +1276,9 @@ class PartialEvaluator {
             preEvaluatedFont.type,
             subtype && subtype.name
           );
-          const xrefFontStats = xref.stats.fontTypes;
-          xrefFontStats[fontType] = true;
+          if (fontType !== undefined) {
+            xref.stats.addFontType(fontType);
+          }
         } catch (ex) {}
 
         fontCapability.resolve(
@@ -2366,8 +2367,8 @@ class PartialEvaluator {
       return {
         str,
         dir: bidiResult.dir,
-        width: textChunk.totalWidth,
-        height: textChunk.totalHeight,
+        width: Math.abs(textChunk.totalWidth),
+        height: Math.abs(textChunk.totalHeight),
         transform: textChunk.transform,
         fontName: textChunk.fontName,
         hasEOL: textChunk.hasEOL,
@@ -2458,7 +2459,11 @@ class PartialEvaluator {
       if (textState.font.vertical) {
         const advanceY = (lastPosY - posY) / textContentItem.textAdvanceScale;
         const advanceX = posX - lastPosX;
-        if (advanceY < textContentItem.negativeSpaceMax) {
+
+        // When the total height of the current chunk is negative
+        // then we're writing from bottom to top.
+        const textOrientation = Math.sign(textContentItem.height);
+        if (advanceY < textOrientation * textContentItem.negativeSpaceMax) {
           if (
             Math.abs(advanceX) >
             0.5 * textContentItem.width /* not the same column */
@@ -2475,15 +2480,21 @@ class PartialEvaluator {
           appendEOL();
           return;
         }
-        if (advanceY <= textContentItem.trackingSpaceMin) {
+        if (advanceY <= textOrientation * textContentItem.trackingSpaceMin) {
           textContentItem.height += advanceY;
-        } else if (!addFakeSpaces(advanceY, textContentItem.prevTransform)) {
+        } else if (
+          !addFakeSpaces(
+            advanceY,
+            textContentItem.prevTransform,
+            textOrientation
+          )
+        ) {
           if (textContentItem.str.length === 0) {
             textContent.items.push({
               str: " ",
               dir: "ltr",
               width: 0,
-              height: advanceY,
+              height: Math.abs(advanceY),
               transform: textContentItem.prevTransform,
               fontName: textContentItem.fontName,
               hasEOL: false,
@@ -2498,7 +2509,11 @@ class PartialEvaluator {
 
       const advanceX = (posX - lastPosX) / textContentItem.textAdvanceScale;
       const advanceY = posY - lastPosY;
-      if (advanceX < textContentItem.negativeSpaceMax) {
+
+      // When the total width of the current chunk is negative
+      // then we're writing from right to left.
+      const textOrientation = Math.sign(textContentItem.width);
+      if (advanceX < textOrientation * textContentItem.negativeSpaceMax) {
         if (
           Math.abs(advanceY) >
           0.5 * textContentItem.height /* not the same line */
@@ -2515,14 +2530,16 @@ class PartialEvaluator {
         return;
       }
 
-      if (advanceX <= textContentItem.trackingSpaceMin) {
+      if (advanceX <= textOrientation * textContentItem.trackingSpaceMin) {
         textContentItem.width += advanceX;
-      } else if (!addFakeSpaces(advanceX, textContentItem.prevTransform)) {
+      } else if (
+        !addFakeSpaces(advanceX, textContentItem.prevTransform, textOrientation)
+      ) {
         if (textContentItem.str.length === 0) {
           textContent.items.push({
             str: " ",
             dir: "ltr",
-            width: advanceX,
+            width: Math.abs(advanceX),
             height: 0,
             transform: textContentItem.prevTransform,
             fontName: textContentItem.fontName,
@@ -2572,7 +2589,8 @@ class PartialEvaluator {
           (i === 0 ||
             i + 1 === ii ||
             glyphs[i - 1].unicode === " " ||
-            glyphs[i + 1].unicode === " ")
+            glyphs[i + 1].unicode === " " ||
+            extraSpacing)
         ) {
           // Don't push a " " in the textContentItem
           // (except when it's between two non-spaces chars),
@@ -2650,10 +2668,10 @@ class PartialEvaluator {
       }
     }
 
-    function addFakeSpaces(width, transf) {
+    function addFakeSpaces(width, transf, textOrientation) {
       if (
-        textContentItem.spaceInFlowMin <= width &&
-        width <= textContentItem.spaceInFlowMax
+        textOrientation * textContentItem.spaceInFlowMin <= width &&
+        width <= textOrientation * textContentItem.spaceInFlowMax
       ) {
         if (textContentItem.initialized) {
           textContentItem.str.push(" ");
@@ -2675,8 +2693,8 @@ class PartialEvaluator {
         // TODO: check if using the orientation from last chunk is
         // better or not.
         dir: "ltr",
-        width,
-        height,
+        width: Math.abs(width),
+        height: Math.abs(height),
         transform: transf || getCurrentTextTransform(),
         fontName,
         hasEOL: false,
