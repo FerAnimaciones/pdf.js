@@ -439,8 +439,8 @@ See https://github.com/adobe-type-tools/cmap-resources
     }
     if(urlParams.get("download")=="false"){
       document.getElementById("download").hidden = true;
-      document.getElementById("openFile").hidden = true;
     }
+    document.getElementById("openFile").hidden = true;
     window.addEventListener('load', function () {
       PDFViewerApplication.preferences.set('pdfBugEnabled', true);
     })
