@@ -13,12 +13,21 @@
  * limitations under the License.
  */
 
-import { assert, FormatError, ImageKind, info, warn } from "../shared/util.js";
-import { isName, isStream, Name } from "./primitives.js";
+import {
+  assert,
+  FeatureTest,
+  FormatError,
+  ImageKind,
+  info,
+  warn,
+} from "../shared/util.js";
+import { applyMaskImageData } from "../shared/image_utils.js";
+import { BaseStream } from "./base_stream.js";
 import { ColorSpace } from "./colorspace.js";
 import { DecodeStream } from "./decode_stream.js";
 import { JpegStream } from "./jpeg_stream.js";
 import { JpxImage } from "./jpx.js";
+import { Name } from "./primitives.js";
 
 /**
  * Decode and clamp a value. The formula is different from the spec because we
@@ -94,7 +103,7 @@ class PDFImage {
     const dict = image.dict;
 
     const filter = dict.get("F", "Filter");
-    if (isName(filter)) {
+    if (filter instanceof Name) {
       switch (filter.name) {
         case "JPXDecode":
           const jpxImage = new JpxImage();
@@ -223,7 +232,7 @@ class PDFImage {
         localColorSpaceCache,
       });
     } else if (mask) {
-      if (isStream(mask)) {
+      if (mask instanceof BaseStream) {
         const maskDict = mask.dict,
           imageMask = maskDict.get("IM", "ImageMask");
         if (!imageMask) {
@@ -266,12 +275,16 @@ class PDFImage {
     const mask = image.dict.get("Mask");
 
     if (smask) {
-      smaskData = smask;
+      if (smask instanceof BaseStream) {
+        smaskData = smask;
+      } else {
+        warn("Unsupported /SMask format.");
+      }
     } else if (mask) {
-      if (isStream(mask) || Array.isArray(mask)) {
+      if (mask instanceof BaseStream || Array.isArray(mask)) {
         maskData = mask;
       } else {
-        warn("Unsupported mask format.");
+        warn("Unsupported /Mask format.");
       }
     }
 
@@ -287,7 +300,7 @@ class PDFImage {
     });
   }
 
-  static createMask({
+  static createRawMask({
     imgArray,
     width,
     height,
@@ -301,7 +314,7 @@ class PDFImage {
     ) {
       assert(
         imgArray instanceof Uint8ClampedArray,
-        'PDFImage.createMask: Unsupported "imgArray" type.'
+        'PDFImage.createRawMask: Unsupported "imgArray" type.'
       );
     }
     // |imgArray| might not contain full data for every pixel of the mask, so
@@ -340,6 +353,69 @@ class PDFImage {
     }
 
     return { data, width, height, interpolate };
+  }
+
+  static createMask({
+    imgArray,
+    width,
+    height,
+    imageIsFromDecodeStream,
+    inverseDecode,
+    interpolate,
+  }) {
+    if (
+      typeof PDFJSDev === "undefined" ||
+      PDFJSDev.test("!PRODUCTION || TESTING")
+    ) {
+      assert(
+        imgArray instanceof Uint8ClampedArray,
+        'PDFImage.createMask: Unsupported "imgArray" type.'
+      );
+    }
+
+    const isSingleOpaquePixel =
+      width === 1 &&
+      height === 1 &&
+      inverseDecode === (imgArray.length === 0 || !!(imgArray[0] & 128));
+
+    if (isSingleOpaquePixel) {
+      return { isSingleOpaquePixel };
+    }
+
+    if (FeatureTest.isOffscreenCanvasSupported) {
+      const canvas = new OffscreenCanvas(width, height);
+      const ctx = canvas.getContext("2d");
+      const imgData = ctx.createImageData(width, height);
+      applyMaskImageData({
+        src: imgArray,
+        dest: imgData.data,
+        width,
+        height,
+        inverseDecode,
+      });
+
+      ctx.putImageData(imgData, 0, 0);
+      const bitmap = canvas.transferToImageBitmap();
+
+      return {
+        data: null,
+        width,
+        height,
+        interpolate,
+        bitmap,
+      };
+    }
+
+    // Get the data almost as they're and they'll be decoded
+    // just before being drawn.
+    return this.createRawMask({
+      imgArray,
+      width,
+      height,
+      inverseDecode,
+      imageIsFromDecodeStream,
+      interpolate,
+    });
   }
 
   get drawWidth() {

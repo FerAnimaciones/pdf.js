@@ -40,7 +40,7 @@ import {
 import {
   approximateFraction,
   DEFAULT_SCALE,
-  getOutputScale,
+  OutputScale,
   RendererType,
   RenderingStates,
   roundToDivide,
@@ -320,23 +320,6 @@ class PDFPageView {
   }
 
   update({ scale = 0, rotation = null, optionalContentConfigPromise = null }) {
-    if (
-      typeof PDFJSDev !== "undefined" &&
-      PDFJSDev.test("GENERIC") &&
-      typeof arguments[0] !== "object"
-    ) {
-      console.error(
-        "PDFPageView.update called with separate parameters, please use an object instead."
-      );
-
-      this.update({
-        scale: arguments[0],
-        rotation: arguments[1],
-        optionalContentConfigPromise: arguments[2],
-      });
-      return;
-    }
-
     this.scale = scale || this.scale;
     if (typeof rotation === "number") {
       this.rotation = rotation; // The rotation may be zero.
@@ -346,16 +329,14 @@ class PDFPageView {
     }
 
     const totalRotation = (this.rotation + this.pdfPageRotate) % 360;
-    const viewportScale = this.scale * PixelsPerInch.PDF_TO_CSS_UNITS;
     this.viewport = this.viewport.clone({
-      scale: viewportScale,
+      scale: this.scale * PixelsPerInch.PDF_TO_CSS_UNITS,
       rotation: totalRotation,
     });
 
     if (this._isStandalone) {
       const { style } = document.documentElement;
       style.setProperty("--zoom-factor", this.scale);
-      style.setProperty("--viewport-scale-factor", viewportScale);
     }
 
     if (this.svg) {
@@ -701,7 +682,6 @@ class PDFPageView {
         return finishPaintTask(null).then(() => {
           if (textLayer) {
             const readableStream = pdfPage.streamTextContent({
-              normalizeWhitespace: true,
               includeMarkedContent: true,
             });
             textLayer.setTextContentStream(readableStream);
@@ -807,8 +787,7 @@ class PDFPageView {
     }
 
     const ctx = canvas.getContext("2d", { alpha: false });
-    const outputScale = getOutputScale(ctx);
-    this.outputScale = outputScale;
+    const outputScale = (this.outputScale = new OutputScale());
 
     if (this.useOnlyCssZoom) {
       const actualSizeViewport = viewport.clone({
@@ -818,7 +797,6 @@ class PDFPageView {
       // of the page.
       outputScale.sx *= actualSizeViewport.width / viewport.width;
       outputScale.sy *= actualSizeViewport.height / viewport.height;
-      outputScale.scaled = true;
     }
 
     if (this.maxCanvasPixels > 0) {
@@ -827,7 +805,6 @@ class PDFPageView {
       if (outputScale.sx > maxScale || outputScale.sy > maxScale) {
         outputScale.sx = maxScale;
         outputScale.sy = maxScale;
-        outputScale.scaled = true;
         this.hasRestrictedScaling = true;
       } else {
         this.hasRestrictedScaling = false;
@@ -845,9 +822,9 @@ class PDFPageView {
     this.paintedViewportMap.set(canvas, viewport);
 
     // Rendering area
-    const transform = !outputScale.scaled
-      ? null
-      : [outputScale.sx, 0, 0, outputScale.sy, 0, 0];
+    const transform = outputScale.scaled
+      ? [outputScale.sx, 0, 0, outputScale.sy, 0, 0]
+      : null;
     const renderContext = {
       canvasContext: ctx,
       transform,
@@ -913,11 +890,7 @@ class PDFPageView {
       })
       .then(opList => {
         ensureNotCancelled();
-        const svgGfx = new SVGGraphics(
-          pdfPage.commonObjs,
-          pdfPage.objs,
-          /* forceDataSchema = */ compatibilityParams.disableCreateObjectURL
-        );
+        const svgGfx = new SVGGraphics(pdfPage.commonObjs, pdfPage.objs);
         return svgGfx.getSVG(opList, actualSizeViewport).then(svg => {
           ensureNotCancelled();
           this.svg = svg;

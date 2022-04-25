@@ -117,6 +117,7 @@
 !issue11878.pdf
 !issue13916.pdf
 !issue14023.pdf
+!issue14438.pdf
 !bad-PageLabels.pdf
 !decodeACSuccessive.pdf
 !issue13003.pdf
@@ -128,6 +129,7 @@
 !asciihexdecode.pdf
 !bug766086.pdf
 !bug793632.pdf
+!issue14821.pdf
 !bug1020858.pdf
 !prefilled_f1040.pdf
 !bug1050040.pdf
@@ -174,6 +176,7 @@
 !issue8565.pdf
 !clippath.pdf
 !issue8795_reduced.pdf
+!bug1755507.pdf
 !close-path-bug.pdf
 !issue6019.pdf
 !issue6621.pdf
@@ -217,6 +220,8 @@
 !issue7339_reduced.pdf
 !issue3438.pdf
 !issue11403_reduced.pdf
+!ContentStreamNoCycleType3insideType3.pdf
+!ContentStreamCycleType3insideType3.pdf
 !issue2074.pdf
 !scan-bad.pdf
 !issue13561_reduced.pdf
@@ -234,6 +239,7 @@
 !pdfjsbad1586.pdf
 !standard_fonts.pdf
 !freeculture.pdf
+!issue14802.pdf
 !issue6006.pdf
 !pdfkit_compressed.pdf
 !TAMReview.pdf
@@ -299,6 +305,7 @@
 !issue14117.pdf
 !issue5070.pdf
 !issue5238.pdf
+!jp2k-resetprob.pdf
 !issue5244.pdf
 !issue5291.pdf
 !issue4398.pdf
@@ -316,6 +323,7 @@
 !jbig2_symbol_offset.pdf
 !gradientfill.pdf
 !bug903856.pdf
+!issue14618.pdf
 !bug850854.pdf
 !issue12810.pdf
 !bug866395.pdf
@@ -354,6 +362,7 @@
 !issue4650.pdf
 !issue6721_reduced.pdf
 !issue3025.pdf
+!french_diacritics.pdf
 !issue2099-1.pdf
 !issue3371.pdf
 !issue2956.pdf
@@ -468,6 +477,7 @@
 !issue11442_reduced.pdf
 !issue11549_reduced.pdf
 !issue8097_reduced.pdf
+!bug1743245.pdf
 !quadpoints.pdf
 !transparent.pdf
 !issue13931.pdf
@@ -480,11 +490,13 @@
 !tiling-pattern-box.pdf
 !tiling-pattern-large-steps.pdf
 !issue13201.pdf
+!issue14462_reduced.pdf
 !issue11555.pdf
 !issue12337.pdf
 !pr12564.pdf
 !pr12828.pdf
 !secHandler.pdf
+!issue14297.pdf
 !rc_annotation.pdf
 !issue14267.pdf
 !PDFBOX-4352-0.pdf
@@ -494,6 +506,7 @@
 !poppler-85140-0.pdf
 !poppler-395-0-fuzzed.pdf
 !GHOSTSCRIPT-698804-1-fuzzed.pdf
+!issue14814.pdf
 !poppler-91414-0-53.pdf
 !poppler-91414-0-54.pdf
 !poppler-742-0-fuzzed.pdf
@@ -501,3 +514,8 @@
 !PDFBOX-3148-2-fuzzed.pdf
 !poppler-90-0-fuzzed.pdf
 !issue14415.pdf
+!issue14307.pdf
+!issue14497.pdf
+!issue14502.pdf
+!issue13211.pdf
+!issue14627.pdf
