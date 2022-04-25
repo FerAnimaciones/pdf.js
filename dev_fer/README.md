@@ -17,8 +17,8 @@ if(urlParams.get("print")=="false"){
 }
 if(urlParams.get("download")=="false"){
   document.getElementById("download").hidden = true;
-  document.getElementById("openFile").hidden = true;
 }
+document.getElementById("openFile").hidden = true;
 window.addEventListener('load', function () {
   PDFViewerApplication.preferences.set('pdfBugEnabled', true);
 })
