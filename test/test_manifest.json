@@ -6,6 +6,13 @@
       "link": true,
       "type": "other"
     },
+    {  "id": "issue14864",
+       "file": "pdfs/issue14864.pdf",
+       "md5": "cfe5e68267d1e84ec909a915911974cf",
+       "rounds": 1,
+       "link": true,
+       "type": "other"
+    },
     {  "id": "filled-background-range",
       "file": "pdfs/filled-background.pdf",
       "md5": "2e3120255d9c3e79b96d2543b12d2589",
@@ -53,6 +60,38 @@
        "enhance": true,
        "type": "text"
     },
+    {  "id": "tracemonkey-forced-colors-eq",
+      "file": "pdfs/tracemonkey.pdf",
+      "md5": "9a192d8b1a7dc652a19835f6f08098bd",
+      "rounds": 1,
+      "pageColors": {
+         "background": "black",
+         "foreground": "#00FF00"
+      },
+      "type": "eq"
+   },
+   {  "id": "tracemonkey-viewer-colors-eq",
+      "file": "pdfs/tracemonkey.pdf",
+      "md5": "9a192d8b1a7dc652a19835f6f08098bd",
+      "rounds": 1,
+      "pageColors": {
+         "background": "Canvas",
+         "foreground": "CanvasText"
+      },
+      "type": "eq",
+      "about": "Uses the same pageColors as the viewer."
+   },
+   {  "id": "tracemonkey-default-colors-eq",
+      "file": "pdfs/tracemonkey.pdf",
+      "md5": "9a192d8b1a7dc652a19835f6f08098bd",
+      "rounds": 1,
+      "pageColors": {
+         "background": "white",
+         "foreground": "black"
+      },
+      "type": "eq",
+      "about": "Uses the default colors."
+   },
     {  "id": "issue3925",
        "file": "pdfs/issue3925.pdf",
        "md5": "c5c895deecf7a7565393587e0d61be2b",
@@ -2019,6 +2058,12 @@
        "rounds": 1,
        "type": "eq"
     },
+    {  "id": "issue14953",
+       "file": "pdfs/issue14953.pdf",
+       "md5": "dd7d6cb92e58d75a0eb8c0476a3bc64a",
+       "rounds": 1,
+       "type": "eq"
+    },
     {  "id": "extgstate-text",
        "file": "pdfs/extgstate.pdf",
        "md5": "001bb4ec04463a01d93aad748361f049",
@@ -2976,6 +3021,14 @@
          "7R": false
        },
        "about": "Need to test *at least* three pages, since the `GlobalImageCache` is involved."
+    },
+    {  "id": "issue14917",
+       "file": "pdfs/issue14917.pdf",
+       "md5": "12201b35853f78a501ac46b91608f8b6",
+       "rounds": 1,
+       "link": true,
+       "lastPage": 1,
+       "type": "eq"
     },
     {  "id": "issue1127-text",
        "file": "pdfs/issue1127.pdf",
@@ -4590,6 +4643,12 @@
        "type": "load",
        "password": "\u00E6\u00F8\u00E5",
        "about": "The password (æøå) is UTF8 encoded."
+    },
+    {  "id": "issue14881",
+       "file": "pdfs/issue14881.pdf",
+       "md5": "1aa3f2c7929eaf4502fcf6488ff31b5f",
+       "rounds": 1,
+       "type": "eq"
     },
     {  "id": "High-Pressure-Measurement-WP-001287",
        "file": "pdfs/High-Pressure-Measurement-WP-001287.pdf",
@@ -6403,5 +6462,50 @@
       "link": true,
       "lastPage": 1,
       "type": "eq"
+   },
+   {  "id": "issue3351.1",
+      "file": "pdfs/issue3351.1.pdf",
+      "md5": "4216245a5f18bb3eac80575ccf0b272d",
+      "rounds": 1,
+      "link": true,
+      "lastPage": 1,
+      "type": "eq"
+   },
+   {  "id": "issue3351.2",
+      "file": "pdfs/issue3351.2.pdf",
+      "md5": "fa3fd1659c409c7824ef8838c3071efc",
+      "rounds": 1,
+      "link": true,
+      "lastPage": 1,
+      "type": "eq"
+   },
+   {  "id": "issue3351.3",
+      "file": "pdfs/issue3351.3.pdf",
+      "md5": "60e2f2c480b6bc0e7f726743c6896520",
+      "rounds": 1,
+      "link": true,
+      "lastPage": 1,
+      "type": "eq"
+   },
+   {  "id": "issue14928",
+      "file": "pdfs/issue14928.pdf",
+      "md5": "9687feb927eeb1b2a6f0794ea00f5c60",
+      "rounds": 1,
+      "link": true,
+      "lastPage": 1,
+      "type": "eq",
+      "print": true,
+      "annotationStorage": {
+        "1483R": {
+          "value": "05/17/2022"
+        }
+      }
+   },
+   { "id": "bug1766987",
+      "file": "pdfs/bug1766987.pdf",
+      "md5": "3ce134ead03d6158c3e8207453dcd21d",
+      "rounds": 1,
+      "link": true,
+      "type": "other"
    }
 ]

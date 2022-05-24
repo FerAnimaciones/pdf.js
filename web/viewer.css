@@ -22,14 +22,17 @@
   --sidebar-transition-timing-function: ease;
   --scale-select-container-width: 140px;
   --scale-select-overflow: 22px;
-  --loadingBar-end-offset: 0;
 
   --toolbar-icon-opacity: 0.7;
   --doorhanger-icon-opacity: 0.9;
 
   --main-color: rgba(12, 12, 13, 1);
   --body-bg-color: rgba(237, 237, 240, 1);
-  --errorWrapper-bg-color: rgba(255, 110, 110, 1); /* -webkit-non-mozcentral */
+  /*#if !MOZCENTRAL*/
+  --errorWrapper-bg-color: rgba(255, 110, 110, 1);
+  /*#endif*/
+  --progressBar-percent: 0%;
+  --progressBar-end-offset: 0;
   --progressBar-color: rgba(10, 132, 255, 1);
   --progressBar-indeterminate-bg-color: rgba(221, 221, 222, 1);
   --progressBar-indeterminate-blend-color: rgba(116, 177, 239, 1);
@@ -77,7 +80,9 @@
   --toolbarButton-zoomIn-icon: url(images/toolbarButton-zoomIn.svg);
   --toolbarButton-presentationMode-icon: url(images/toolbarButton-presentationMode.svg);
   --toolbarButton-print-icon: url(images/toolbarButton-print.svg);
+  /*#if GENERIC*/
   --toolbarButton-openFile-icon: url(images/toolbarButton-openFile.svg);
+  /*#endif*/
   --toolbarButton-download-icon: url(images/toolbarButton-download.svg);
   --toolbarButton-bookmark-icon: url(images/toolbarButton-bookmark.svg);
   --toolbarButton-viewThumbnail-icon: url(images/toolbarButton-viewThumbnail.svg);
@@ -112,7 +117,9 @@
   :root {
     --main-color: rgba(249, 249, 250, 1);
     --body-bg-color: rgba(42, 42, 46, 1);
-    --errorWrapper-bg-color: rgba(169, 14, 14, 1); /* -webkit-non-mozcentral */
+    /*#if !MOZCENTRAL*/
+    --errorWrapper-bg-color: rgba(169, 14, 14, 1);
+    /*#endif*/
     --progressBar-color: rgba(0, 96, 223, 1);
     --progressBar-indeterminate-bg-color: rgba(40, 40, 43, 1);
     --progressBar-indeterminate-blend-color: rgba(20, 68, 133, 1);
@@ -338,7 +345,7 @@ select {
 
 #loadingBar {
   position: absolute;
-  inset-inline: 0 var(--loadingBar-end-offset);
+  inset-inline: 0 var(--progressBar-end-offset);
   height: 4px;
   background-color: var(--body-bg-color);
   border-bottom: 1px solid var(--toolbar-border-color);
@@ -355,23 +362,26 @@ select {
   position: absolute;
   top: 0;
   left: 0;
-  width: 0%;
+  width: 100%;
+  transform: scaleX(var(--progressBar-percent));
+  transform-origin: 0 0;
   height: 100%;
   background-color: var(--progressBar-color);
   overflow: hidden;
-  transition: width 200ms;
+  transition: transform 200ms;
 }
 
 @keyframes progressIndeterminate {
   0% {
-    left: -142px;
+    transform: translateX(-142px);
   }
   100% {
-    left: 0;
+    transform: translateX(0);
   }
 }
 
 #loadingBar .progress.indeterminate {
+  transform: none;
   background-color: var(--progressBar-indeterminate-bg-color);
   transition: none;
 }
@@ -457,9 +467,11 @@ select {
 #findInput {
   width: 200px;
 }
+/*#if !MOZCENTRAL*/
 #findInput::-webkit-input-placeholder {
   color: rgba(191, 191, 191, 1);
 }
+/*#endif*/
 #findInput::placeholder {
   font-style: normal;
 }
@@ -482,7 +494,8 @@ select {
 
 #secondaryToolbarButtonContainer {
   max-width: 220px;
-  max-height: 400px;
+  min-height: 26px;
+  max-height: calc(var(--viewer-container-height) - 40px);
   overflow-y: auto;
   margin-bottom: -4px;
 }
@@ -625,11 +638,8 @@ select {
 
 .splitToolbarButton > .toolbarButton:hover,
 .splitToolbarButton > .toolbarButton:focus-visible,
-.dropdownToolbarButton:hover,
-.toolbarButton.textButton:hover,
-.toolbarButton.textButton:focus-visible {
+.dropdownToolbarButton:hover {
   background-color: var(--button-hover-color);
-  z-index: 199;
 }
 .splitToolbarButton > .toolbarButton {
   position: relative;
@@ -641,12 +651,10 @@ select {
 
 .splitToolbarButtonSeparator {
   float: inline-start;
-  padding: 10px 0;
-  width: 1px;
-  background-color: var(--separator-color);
-  z-index: 99;
-  display: inline-block;
   margin: 4px 0;
+  width: 1px;
+  height: 20px;
+  background-color: var(--separator-color);
 }
 
 .toolbarButton,
@@ -777,102 +785,104 @@ select {
   inset-inline-start: 12px;
 }
 
-.toolbarButton#sidebarToggle::before {
+#sidebarToggle::before {
   mask-image: var(--toolbarButton-sidebarToggle-icon);
   transform: scaleX(var(--dir-factor));
 }
 
-.toolbarButton#secondaryToolbarToggle::before {
+#secondaryToolbarToggle::before {
   mask-image: var(--toolbarButton-secondaryToolbarToggle-icon);
   transform: scaleX(var(--dir-factor));
 }
 
-#findPrevious.toolbarButton::before {
+#findPrevious::before {
   mask-image: var(--findbarButton-previous-icon);
 }
 
-#findNext.toolbarButton::before {
+#findNext::before {
   mask-image: var(--findbarButton-next-icon);
 }
 
-.toolbarButton.pageUp::before {
+#previous::before {
   mask-image: var(--toolbarButton-pageUp-icon);
 }
 
-.toolbarButton.pageDown::before {
+#next::before {
   mask-image: var(--toolbarButton-pageDown-icon);
 }
 
-.toolbarButton.zoomOut::before {
+#zoomOut::before {
   mask-image: var(--toolbarButton-zoomOut-icon);
 }
 
-.toolbarButton.zoomIn::before {
+#zoomIn::before {
   mask-image: var(--toolbarButton-zoomIn-icon);
 }
 
-.toolbarButton.presentationMode::before,
-.secondaryToolbarButton.presentationMode::before {
+#presentationMode::before,
+#secondaryPresentationMode::before {
   mask-image: var(--toolbarButton-presentationMode-icon);
 }
 
-.toolbarButton.print::before,
-.secondaryToolbarButton.print::before {
+#print::before,
+#secondaryPrint::before {
   mask-image: var(--toolbarButton-print-icon);
 }
 
-.toolbarButton.openFile::before,
-.secondaryToolbarButton.openFile::before {
+/*#if GENERIC*/
+#openFile::before,
+#secondaryOpenFile::before {
   mask-image: var(--toolbarButton-openFile-icon);
 }
+/*#endif*/
 
-.toolbarButton.download::before,
-.secondaryToolbarButton.download::before {
+#download::before,
+#secondaryDownload::before {
   mask-image: var(--toolbarButton-download-icon);
 }
 
-.secondaryToolbarButton.bookmark {
+a.secondaryToolbarButton {
   padding-top: 6px;
   text-decoration: none;
 }
-
-.bookmark[href="#"] {
+a.toolbarButton[href="#"],
+a.secondaryToolbarButton[href="#"] {
   opacity: 0.5;
   pointer-events: none;
 }
 
-.toolbarButton.bookmark::before,
-.secondaryToolbarButton.bookmark::before {
+#viewBookmark::before,
+#secondaryViewBookmark::before {
   mask-image: var(--toolbarButton-bookmark-icon);
 }
 
-#viewThumbnail.toolbarButton::before {
+#viewThumbnail::before {
   mask-image: var(--toolbarButton-viewThumbnail-icon);
 }
 
-#viewOutline.toolbarButton::before {
+#viewOutline::before {
   mask-image: var(--toolbarButton-viewOutline-icon);
   transform: scaleX(var(--dir-factor));
 }
 
-#viewAttachments.toolbarButton::before {
+#viewAttachments::before {
   mask-image: var(--toolbarButton-viewAttachments-icon);
 }
 
-#viewLayers.toolbarButton::before {
+#viewLayers::before {
   mask-image: var(--toolbarButton-viewLayers-icon);
 }
 
-#currentOutlineItem.toolbarButton::before {
+#currentOutlineItem::before {
   mask-image: var(--toolbarButton-currentOutlineItem-icon);
   transform: scaleX(var(--dir-factor));
 }
 
-#viewFind.toolbarButton::before {
+#viewFind::before {
   mask-image: var(--toolbarButton-search-icon);
 }
 
-.toolbarButton.pdfSidebarNotification::after {
+.pdfSidebarNotification::after {
   position: absolute;
   display: inline-block;
   top: 1px;
@@ -903,76 +913,75 @@ select {
   padding-inline-end: 4px;
 }
 
-.secondaryToolbarButton.firstPage::before {
+#firstPage::before {
   mask-image: var(--secondaryToolbarButton-firstPage-icon);
 }
 
-.secondaryToolbarButton.lastPage::before {
+#lastPage::before {
   mask-image: var(--secondaryToolbarButton-lastPage-icon);
 }
 
-.secondaryToolbarButton.rotateCcw::before {
+#pageRotateCcw::before {
   mask-image: var(--secondaryToolbarButton-rotateCcw-icon);
 }
 
-.secondaryToolbarButton.rotateCw::before {
+#pageRotateCw::before {
   mask-image: var(--secondaryToolbarButton-rotateCw-icon);
 }
 
-.secondaryToolbarButton.selectTool::before {
+#cursorSelectTool::before {
   mask-image: var(--secondaryToolbarButton-selectTool-icon);
 }
 
-.secondaryToolbarButton.handTool::before {
+#cursorHandTool::before {
   mask-image: var(--secondaryToolbarButton-handTool-icon);
 }
 
-.secondaryToolbarButton.scrollPage::before {
+#scrollPage::before {
   mask-image: var(--secondaryToolbarButton-scrollPage-icon);
 }
 
-.secondaryToolbarButton.scrollVertical::before {
+#scrollVertical::before {
   mask-image: var(--secondaryToolbarButton-scrollVertical-icon);
 }
 
-.secondaryToolbarButton.scrollHorizontal::before {
+#scrollHorizontal::before {
   mask-image: var(--secondaryToolbarButton-scrollHorizontal-icon);
 }
 
-.secondaryToolbarButton.scrollWrapped::before {
+#scrollWrapped::before {
   mask-image: var(--secondaryToolbarButton-scrollWrapped-icon);
 }
 
-.secondaryToolbarButton.spreadNone::before {
+#spreadNone::before {
   mask-image: var(--secondaryToolbarButton-spreadNone-icon);
 }
 
-.secondaryToolbarButton.spreadOdd::before {
+#spreadOdd::before {
   mask-image: var(--secondaryToolbarButton-spreadOdd-icon);
 }
 
-.secondaryToolbarButton.spreadEven::before {
+#spreadEven::before {
   mask-image: var(--secondaryToolbarButton-spreadEven-icon);
 }
 
-.secondaryToolbarButton.documentProperties::before {
+#documentProperties::before {
   mask-image: var(--secondaryToolbarButton-documentProperties-icon);
 }
 
 .verticalToolbarSeparator {
   display: block;
-  padding: 11px 0;
   margin: 5px 2px;
   width: 1px;
+  height: 22px;
   background-color: var(--separator-color);
 }
-
 .horizontalToolbarSeparator {
   display: block;
-  margin: 6px 0 5px;
+  margin: 6px 0;
   height: 1px;
   width: 100%;
-  border-top: 1px solid var(--doorhanger-separator-color);
+  background-color: var(--doorhanger-separator-color);
 }
 
 .toolbarField {
@@ -981,9 +990,7 @@ select {
   border-radius: 2px;
   background-color: var(--field-bg-color);
   background-clip: padding-box;
-  border-width: 1px;
-  border-style: solid;
-  border-color: var(--field-border-color);
+  border: 1px solid var(--field-border-color);
   box-shadow: none;
   color: var(--field-color);
   font-size: 12px;
@@ -999,21 +1006,21 @@ select {
   margin-inline-start: 7px;
 }
 
-.toolbarField.pageNumber {
+#pageNumber {
   -moz-appearance: textfield; /* hides the spinner in moz */
   text-align: right;
   width: 40px;
 }
-
-.toolbarField.pageNumber.visiblePageIsLoading {
+#pageNumber.visiblePageIsLoading {
   background-image: var(--loading-icon);
   background-repeat: no-repeat;
   background-position: 3px;
 }
-
-.toolbarField.pageNumber::-webkit-inner-spin-button {
+/*#if !MOZCENTRAL*/
+#pageNumber::-webkit-inner-spin-button {
   -webkit-appearance: none;
 }
+/*#endif*/
 
 .toolbarField:focus {
   border-color: #0a84ff;
@@ -1182,7 +1189,8 @@ a:focus > .thumbnail > .thumbnailSelectionRing,
   background: rgba(0, 0, 255, 0.3);
 }
 
-#errorWrapper /* -webkit-non-mozcentral */ {
+/*#if !MOZCENTRAL*/
+#errorWrapper {
   background-color: var(--errorWrapper-bg-color);
   color: var(--main-color);
   left: 0;
@@ -1192,17 +1200,17 @@ a:focus > .thumbnail > .thumbnailSelectionRing,
   padding: 3px 6px;
 }
 
-#errorMessageLeft /* -webkit-non-mozcentral */ {
+#errorMessageLeft {
   float: left;
 }
-#errorMessageRight /* -webkit-non-mozcentral */ {
+#errorMessageRight {
   float: right;
 }
 
-#errorSpacer /* -webkit-non-mozcentral */ {
+#errorSpacer {
   clear: both;
 }
-#errorMoreInfo /* -webkit-non-mozcentral */ {
+#errorMoreInfo {
   background-color: var(--field-bg-color);
   color: var(--field-color);
   border: 1px solid var(--field-border-color);
@@ -1210,6 +1218,7 @@ a:focus > .thumbnail > .thumbnailSelectionRing,
   margin: 3px;
   width: 98%;
 }
+/*#endif*/
 
 .dialogButton {
   width: auto;

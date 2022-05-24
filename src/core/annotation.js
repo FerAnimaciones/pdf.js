@@ -33,9 +33,14 @@ import {
   Util,
   warn,
 } from "../shared/util.js";
-import { collectActions, getInheritableProperty } from "./core_utils.js";
+import {
+  collectActions,
+  getInheritableProperty,
+  numberToString,
+} from "./core_utils.js";
 import {
   createDefaultAppearance,
+  getPdfColor,
   parseDefaultAppearance,
 } from "./default_appearance.js";
 import { Dict, isName, Name, Ref, RefSet } from "./primitives.js";
@@ -614,6 +619,39 @@ class Annotation {
   }
 
   /**
+   * Set the line endings; should only be used with specific annotation types.
+   * @param {Array} lineEndings - The line endings array.
+   */
+  setLineEndings(lineEndings) {
+    this.lineEndings = ["None", "None"]; // The default values.
+
+    if (Array.isArray(lineEndings) && lineEndings.length === 2) {
+      for (let i = 0; i < 2; i++) {
+        const obj = lineEndings[i];
+
+        if (obj instanceof Name) {
+          switch (obj.name) {
+            case "None":
+              continue;
+            case "Square":
+            case "Circle":
+            case "Diamond":
+            case "OpenArrow":
+            case "ClosedArrow":
+            case "Butt":
+            case "ROpenArrow":
+            case "RClosedArrow":
+            case "Slash":
+              this.lineEndings[i] = obj.name;
+              continue;
+          }
+        }
+        warn(`Ignoring invalid lineEnding: ${obj}`);
+      }
+    }
+  }
+
+  /**
    * Set the color for background and border if any.
    * The default values are transparent.
    *
@@ -628,6 +666,27 @@ class Annotation {
     } else {
       this.borderColor = this.backgroundColor = null;
     }
+  }
+
+  getBorderAndBackgroundAppearances() {
+    if (!this.backgroundColor && !this.borderColor) {
+      return "";
+    }
+    const width = this.data.rect[2] - this.data.rect[0];
+    const height = this.data.rect[3] - this.data.rect[1];
+    const rect = `0 0 ${width} ${height} re`;
+
+    let str = "";
+    if (this.backgroundColor) {
+      str = `${getPdfColor(this.backgroundColor)} ${rect} f `;
+    }
+
+    if (this.borderColor) {
+      const borderWidth = this.borderStyle.width || 1;
+      str += `${borderWidth} w ${getPdfColor(this.borderColor)} ${rect} S `;
+    }
+
+    return str;
   }
 
   /**
@@ -1518,7 +1577,8 @@ class WidgetAnnotation extends Annotation {
     const storageEntry = annotationStorage
       ? annotationStorage.get(this.data.id)
       : undefined;
-    let value = storageEntry && storageEntry.value;
+    let value =
+      storageEntry && (storageEntry.formattedValue || storageEntry.value);
     if (value === undefined) {
       if (!this._hasValueFromXFA || this.appearance) {
         // The annotation hasn't been rendered so use the appearance.
@@ -1530,6 +1590,8 @@ class WidgetAnnotation extends Annotation {
         return "";
       }
     }
+
+    assert(typeof value === "string", "Expected `value` to be a string.");
 
     value = value.trim();
 
@@ -1573,7 +1635,13 @@ class WidgetAnnotation extends Annotation {
       descent = 0;
     }
 
-    const vPadding = defaultPadding + Math.abs(descent) * fontSize;
+    // Take into account the space we have to compute the default vertical
+    // padding.
+    const defaultVPadding = Math.min(
+      Math.floor((totalHeight - fontSize) / 2),
+      defaultPadding
+    );
+    const vPadding = defaultVPadding + Math.abs(descent) * fontSize;
     const alignment = this.data.textAlignment;
 
     if (this.data.multiLine) {
@@ -1604,10 +1672,13 @@ class WidgetAnnotation extends Annotation {
       );
     }
 
+    // Empty or it has a trailing whitespace.
+    const colors = this.getBorderAndBackgroundAppearances();
+
     if (alignment === 0 || alignment > 2) {
       // Left alignment: nothing to do
       return (
-        "/Tx BMC q BT " +
+        `/Tx BMC q ${colors}BT ` +
         defaultAppearance +
         ` 1 0 0 1 ${hPadding} ${vPadding} Tm (${escapeString(
           encodedString
@@ -1626,7 +1697,7 @@ class WidgetAnnotation extends Annotation {
       vPadding
     );
     return (
-      "/Tx BMC q BT " +
+      `/Tx BMC q ${colors}BT ` +
       defaultAppearance +
       ` 1 0 0 1 0 0 Tm ${renderedText}` +
       " ET Q EMC"
@@ -1754,8 +1825,8 @@ class WidgetAnnotation extends Annotation {
     } else {
       shift = hPadding;
     }
-    shift = shift.toFixed(2);
-    vPadding = vPadding.toFixed(2);
+    shift = numberToString(shift);
+    vPadding = numberToString(vPadding);
 
     return `${shift} ${vPadding} Td (${escapeString(text)}) Tj`;
   }
@@ -1853,16 +1924,18 @@ class TextWidgetAnnotation extends WidgetAnnotation {
   }
 
   _getCombAppearance(defaultAppearance, font, text, width, hPadding, vPadding) {
-    const combWidth = (width / this.data.maxLen).toFixed(2);
+    const combWidth = numberToString(width / this.data.maxLen);
     const buf = [];
     const positions = font.getCharPositions(text);
     for (const [start, end] of positions) {
       buf.push(`(${escapeString(text.substring(start, end))}) Tj`);
     }
 
+    // Empty or it has a trailing whitespace.
+    const colors = this.getBorderAndBackgroundAppearances();
     const renderedComb = buf.join(` ${combWidth} 0 Td `);
     return (
-      "/Tx BMC q BT " +
+      `/Tx BMC q ${colors}BT ` +
       defaultAppearance +
       ` 1 0 0 1 ${hPadding} ${vPadding} Tm ${renderedComb}` +
       " ET Q EMC"
@@ -1902,8 +1975,12 @@ class TextWidgetAnnotation extends WidgetAnnotation {
     }
 
     const renderedText = buf.join("\n");
+
+    // Empty or it has a trailing whitespace.
+    const colors = this.getBorderAndBackgroundAppearances();
+
     return (
-      "/Tx BMC q BT " +
+      `/Tx BMC q ${colors}BT ` +
       defaultAppearance +
       ` 1 0 0 1 0 ${height} Tm ${renderedText}` +
       " ET Q EMC"
@@ -1981,7 +2058,7 @@ class TextWidgetAnnotation extends WidgetAnnotation {
     return {
       id: this.data.id,
       value: this.data.fieldValue,
-      defaultValue: this.data.defaultFieldValue,
+      defaultValue: this.data.defaultFieldValue || "",
       multiline: this.data.multiLine,
       password: this.hasFieldFlag(AnnotationFieldFlag.PASSWORD),
       charLimit: this.data.maxLen,
@@ -2259,8 +2336,8 @@ class ButtonWidgetAnnotation extends WidgetAnnotation {
     }
 
     // Values to center the glyph in the bbox.
-    const xShift = (width - metrics.width) / 2;
-    const yShift = (height - metrics.height) / 2;
+    const xShift = numberToString((width - metrics.width) / 2);
+    const yShift = numberToString((height - metrics.height) / 2);
 
     const appearance = `q BT /PdfJsZaDb ${fontSize} Tf 0 g ${xShift} ${yShift} Td (${char}) Tj ET Q`;
 
@@ -2800,22 +2877,26 @@ class LineAnnotation extends MarkupAnnotation {
   constructor(parameters) {
     super(parameters);
 
+    const { dict } = parameters;
     this.data.annotationType = AnnotationType.LINE;
 
-    const lineCoordinates = parameters.dict.getArray("L");
+    const lineCoordinates = dict.getArray("L");
     this.data.lineCoordinates = Util.normalizeRect(lineCoordinates);
+
+    this.setLineEndings(dict.getArray("LE"));
+    this.data.lineEndings = this.lineEndings;
 
     if (!this.appearance) {
       // The default stroke color is black.
       const strokeColor = this.color
         ? Array.from(this.color).map(c => c / 255)
         : [0, 0, 0];
-      const strokeAlpha = parameters.dict.get("CA");
+      const strokeAlpha = dict.get("CA");
 
       // The default fill color is transparent. Setting the fill colour is
       // necessary if/when we want to add support for non-default line endings.
       let fillColor = null,
-        interiorColor = parameters.dict.getArray("IC");
+        interiorColor = dict.getArray("IC");
       if (interiorColor) {
         interiorColor = getRgbColor(interiorColor, null);
         fillColor = interiorColor
@@ -2993,13 +3074,20 @@ class PolylineAnnotation extends MarkupAnnotation {
   constructor(parameters) {
     super(parameters);
 
+    const { dict } = parameters;
     this.data.annotationType = AnnotationType.POLYLINE;
     this.data.vertices = [];
+
+    if (!(this instanceof PolygonAnnotation)) {
+      // Only meaningful for polyline annotations.
+      this.setLineEndings(dict.getArray("LE"));
+      this.data.lineEndings = this.lineEndings;
+    }
 
     // The vertices array is an array of numbers representing the alternating
     // horizontal and vertical coordinates, respectively, of each vertex.
     // Convert this to an array of objects with x and y coordinates.
-    const rawVertices = parameters.dict.getArray("Vertices");
+    const rawVertices = dict.getArray("Vertices");
     if (!Array.isArray(rawVertices)) {
       return;
     }
@@ -3015,7 +3103,7 @@ class PolylineAnnotation extends MarkupAnnotation {
       const strokeColor = this.color
         ? Array.from(this.color).map(c => c / 255)
         : [0, 0, 0];
-      const strokeAlpha = parameters.dict.get("CA");
+      const strokeAlpha = dict.get("CA");
 
       const borderWidth = this.borderStyle.width || 1,
         borderAdjust = 2 * borderWidth;

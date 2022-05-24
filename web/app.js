@@ -525,6 +525,10 @@ const PDFViewerApplication = {
       useOnlyCssZoom: AppOptions.get("useOnlyCssZoom"),
       maxCanvasPixels: AppOptions.get("maxCanvasPixels"),
       enablePermissions: AppOptions.get("enablePermissions"),
+      pageColors: {
+        background: AppOptions.get("pageColorsBackground"),
+        foreground: AppOptions.get("pageColorsForeground"),
+      },
     });
     pdfRenderingQueue.setViewer(this.pdfViewer);
     pdfLinkService.setViewer(this.pdfViewer);
@@ -570,7 +574,6 @@ const PDFViewerApplication = {
 
     this.secondaryToolbar = new SecondaryToolbar(
       appConfig.secondaryToolbar,
-      container,
       eventBus
     );
 
@@ -808,7 +811,7 @@ const PDFViewerApplication = {
     ) {
       try {
         // Trigger saving, to prevent data loss in forms; see issue 12257.
-        await this.save({ sourceEventType: "save" });
+        await this.save();
       } catch (reason) {
         // Ignoring errors, to ensure that document closing won't break.
       }
@@ -961,7 +964,7 @@ const PDFViewerApplication = {
     throw new Error("PDF document not downloaded.");
   },
 
-  async download({ sourceEventType = "download" } = {}) {
+  async download() {
     const url = this._downloadUrl,
       filename = this._docFilename;
     try {
@@ -970,7 +973,7 @@ const PDFViewerApplication = {
       const data = await this.pdfDocument.getData();
       const blob = new Blob([data], { type: "application/pdf" });
 
-      await this.downloadManager.download(blob, url, filename, sourceEventType);
+      await this.downloadManager.download(blob, url, filename);
     } catch (reason) {
       // When the PDF document isn't ready, or the PDF file is still
       // downloading, simply download using the URL.
@@ -978,7 +981,7 @@ const PDFViewerApplication = {
     }
   },
 
-  async save({ sourceEventType = "download" } = {}) {
+  async save() {
     if (this._saveInProgress) {
       return;
     }
@@ -993,23 +996,23 @@ const PDFViewerApplication = {
       const data = await this.pdfDocument.saveDocument();
       const blob = new Blob([data], { type: "application/pdf" });
 
-      await this.downloadManager.download(blob, url, filename, sourceEventType);
+      await this.downloadManager.download(blob, url, filename);
     } catch (reason) {
       // When the PDF document isn't ready, or the PDF file is still
       // downloading, simply fallback to a "regular" download.
       console.error(`Error when saving the document: ${reason.message}`);
-      await this.download({ sourceEventType });
+      await this.download();
     } finally {
       await this.pdfScriptingManager.dispatchDidSave();
       this._saveInProgress = false;
     }
   },
 
-  downloadOrSave(options) {
+  downloadOrSave() {
     if (this.pdfDocument?.annotationStorage.size > 0) {
-      this.save(options);
+      this.save();
     } else {
-      this.download(options);
+      this.download();
     }
   },
 
@@ -1872,7 +1875,6 @@ const PDFViewerApplication = {
     eventBus._on("presentationmode", webViewerPresentationMode);
     eventBus._on("print", webViewerPrint);
     eventBus._on("download", webViewerDownload);
-    eventBus._on("save", webViewerSave);
     eventBus._on("firstpage", webViewerFirstPage);
     eventBus._on("lastpage", webViewerLastPage);
     eventBus._on("nextpage", webViewerNextPage);
@@ -1949,6 +1951,9 @@ const PDFViewerApplication = {
   },
 
   unbindEvents() {
+    if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) {
+      throw new Error("Not implemented: unbindEvents");
+    }
     const { eventBus, _boundEvents } = this;
 
     eventBus._off("resize", webViewerResize);
@@ -1967,7 +1972,6 @@ const PDFViewerApplication = {
     eventBus._off("presentationmode", webViewerPresentationMode);
     eventBus._off("print", webViewerPrint);
     eventBus._off("download", webViewerDownload);
-    eventBus._off("save", webViewerSave);
     eventBus._off("firstpage", webViewerFirstPage);
     eventBus._off("lastpage", webViewerLastPage);
     eventBus._off("nextpage", webViewerNextPage);
@@ -2005,6 +2009,9 @@ const PDFViewerApplication = {
   },
 
   unbindWindowEvents() {
+    if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) {
+      throw new Error("Not implemented: unbindWindowEvents");
+    }
     const { _boundEvents } = this;
 
     window.removeEventListener("visibilitychange", webViewerVisibilityChange);
@@ -2178,7 +2185,8 @@ function webViewerInitialized() {
     appConfig.mainContainer.addEventListener("dragover", function (evt) {
       evt.preventDefault();
 
-      evt.dataTransfer.dropEffect = "move";
+      evt.dataTransfer.dropEffect =
+        evt.dataTransfer.effectAllowed === "copy" ? "copy" : "move";
     });
     appConfig.mainContainer.addEventListener("drop", function (evt) {
       evt.preventDefault();
@@ -2192,9 +2200,6 @@ function webViewerInitialized() {
         fileInput: evt.dataTransfer,
       });
     });
-  } else {
-    appConfig.toolbar.openFile.hidden = true;
-    appConfig.secondaryToolbar.openFileButton.hidden = true;
   }
 
   if (!PDFViewerApplication.supportsDocumentFonts) {
@@ -2229,30 +2234,22 @@ function webViewerInitialized() {
   );
 
   try {
-    webViewerOpenFileViaURL(file);
+    if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
+      if (file) {
+        PDFViewerApplication.open(file);
+      } else {
+        PDFViewerApplication._hideViewBookmark();
+      }
+    } else if (PDFJSDev.test("MOZCENTRAL || CHROME")) {
+      PDFViewerApplication.setTitleUsingUrl(file, /* downloadUrl = */ file);
+      PDFViewerApplication.initPassiveLoading();
+    } else {
+      throw new Error("Not implemented: webViewerInitialized");
+    }
   } catch (reason) {
     PDFViewerApplication.l10n.get("loading_error").then(msg => {
       PDFViewerApplication._documentError(msg, reason);
     });
-  }
-}
-
-function webViewerOpenFileViaURL(file) {
-  if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
-    if (file) {
-      PDFViewerApplication.open(file);
-    } else {
-      PDFViewerApplication._hideViewBookmark();
-    }
-  } else if (PDFJSDev.test("MOZCENTRAL || CHROME")) {
-    PDFViewerApplication.setTitleUsingUrl(file, /* downloadUrl = */ file);
-    PDFViewerApplication.initPassiveLoading();
-  } else {
-    if (file) {
-      throw new Error("Not implemented: webViewerOpenFileViaURL");
-    } else {
-      PDFViewerApplication._hideViewBookmark();
-    }
   }
 }
 
@@ -2332,7 +2329,7 @@ function webViewerNamedAction(evt) {
       break;
 
     case "SaveAs":
-      webViewerSave();
+      PDFViewerApplication.downloadOrSave();
       break;
   }
 }
@@ -2405,6 +2402,8 @@ function webViewerSpreadModeChanged(evt) {
 
 function webViewerResize() {
   const { pdfDocument, pdfViewer } = PDFViewerApplication;
+  pdfViewer.updateContainerHeightCss();
+
   if (!pdfDocument) {
     return;
   }
@@ -2432,9 +2431,9 @@ function webViewerHashchange(evt) {
   }
 }
 
-let webViewerFileInputChange, webViewerOpenFile;
 if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
-  webViewerFileInputChange = function (evt) {
+  // eslint-disable-next-line no-var
+  var webViewerFileInputChange = function (evt) {
     if (PDFViewerApplication.pdfViewer?.isInPresentationMode) {
       return; // Opening a new PDF file isn't supported in Presentation Mode.
     }
@@ -2447,7 +2446,8 @@ if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
     PDFViewerApplication.open(url);
   };
 
-  webViewerOpenFile = function (evt) {
+  // eslint-disable-next-line no-var
+  var webViewerOpenFile = function (evt) {
     const fileInput = PDFViewerApplication.appConfig.openFileInput;
     fileInput.click();
   };
@@ -2460,10 +2460,7 @@ function webViewerPrint() {
   PDFViewerApplication.triggerPrinting();
 }
 function webViewerDownload() {
-  PDFViewerApplication.downloadOrSave({ sourceEventType: "download" });
-}
-function webViewerSave() {
-  PDFViewerApplication.downloadOrSave({ sourceEventType: "save" });
+  PDFViewerApplication.downloadOrSave();
 }
 function webViewerFirstPage() {
   if (PDFViewerApplication.pdfDocument) {

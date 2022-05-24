@@ -1004,6 +1004,21 @@ describe("api", function () {
       await loadingTask.destroy();
     });
 
+    it("gets a destination, from /Names (NameTree) dictionary with keys using PDFDocEncoding (issue 14847)", async function () {
+      const loadingTask = getDocument(buildGetDocumentParams("issue14847.pdf"));
+      const pdfDoc = await loadingTask.promise;
+      const destination = await pdfDoc.getDestination("index");
+      expect(destination).toEqual([
+        { num: 10, gen: 0 },
+        { name: "XYZ" },
+        85.039,
+        728.504,
+        null,
+      ]);
+
+      await loadingTask.destroy();
+    });
+
     it("gets non-string destination", async function () {
       let numberPromise = pdfDocument.getDestination(4.3);
       let booleanPromise = pdfDocument.getDestination(true);
@@ -1305,7 +1320,7 @@ describe("api", function () {
           {
             id: "25R",
             value: "",
-            defaultValue: null,
+            defaultValue: "",
             multiline: false,
             password: false,
             charLimit: null,
@@ -1435,6 +1450,33 @@ describe("api", function () {
       expect(outlineItemOne.bold).toEqual(false);
       expect(outlineItemOne.italic).toEqual(true);
       expect(outlineItemOne.color).toEqual(new Uint8ClampedArray([0, 0, 0]));
+
+      await loadingTask.destroy();
+    });
+
+    it("gets outline, with dest-strings using PDFDocEncoding (issue 14864)", async function () {
+      if (isNodeJS) {
+        pending("Linked test-cases are not supported in Node.js.");
+      }
+      const loadingTask = getDocument(buildGetDocumentParams("issue14864.pdf"));
+      const pdfDoc = await loadingTask.promise;
+      const outline = await pdfDoc.getOutline();
+
+      expect(Array.isArray(outline)).toEqual(true);
+      expect(outline.length).toEqual(6);
+
+      expect(outline[4]).toEqual({
+        dest: "Händel -- Halle🎆lujah",
+        url: null,
+        unsafeUrl: undefined,
+        newWindow: undefined,
+        title: "Händel -- Halle🎆lujah",
+        color: new Uint8ClampedArray([0, 0, 0]),
+        count: undefined,
+        bold: false,
+        italic: false,
+        items: [],
+      });
 
       await loadingTask.destroy();
     });

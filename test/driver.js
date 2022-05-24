@@ -607,7 +607,6 @@ class Driver {
         this._log(
           " Loading page " + task.pageNum + "/" + task.pdfDoc.numPages + "... "
         );
-        this.canvas.mozOpaque = true;
         ctx = this.canvas.getContext("2d", { alpha: false });
         task.pdfDoc.getPage(task.pageNum).then(
           page => {
@@ -648,7 +647,8 @@ class Driver {
               renderForms = false,
               renderPrint = false,
               renderXfa = false,
-              annotationCanvasMap = null;
+              annotationCanvasMap = null,
+              pageColors = null;
 
             if (task.annotationStorage) {
               const entries = Object.entries(task.annotationStorage),
@@ -699,6 +699,7 @@ class Driver {
               renderForms = !!task.forms;
               renderPrint = !!task.print;
               renderXfa = !!task.enableXfa;
+              pageColors = task.pageColors || null;
 
               // Render the annotation layer if necessary.
               if (renderAnnotations || renderForms || renderXfa) {
@@ -746,6 +747,7 @@ class Driver {
               viewport,
               optionalContentConfigPromise: task.optionalContentConfigPromise,
               annotationCanvasMap,
+              pageColors,
               transform,
             };
             if (renderForms) {

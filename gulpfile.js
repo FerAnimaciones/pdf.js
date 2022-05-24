@@ -816,7 +816,7 @@ gulp.task("cmaps", function (done) {
 
 function preprocessCSS(source, defines) {
   const outName = getTempFile("~preprocess", ".css");
-  builder.preprocessCSS(source, outName, defines);
+  builder.preprocess(source, outName, defines);
   let out = fs.readFileSync(outName).toString();
   fs.unlinkSync(outName);
 
@@ -1239,6 +1239,11 @@ gulp.task(
           MOZCENTRAL_DIR + "browser/locales/en-US/pdfviewer/",
         FIREFOX_CONTENT_DIR = EXTENSION_SRC_DIR + "/firefox/content/";
 
+      const MOZCENTRAL_WEB_FILES = [
+        ...COMMON_WEB_FILES,
+        "!web/images/toolbarButton-openFile.svg",
+      ];
+
       // Clear out everything in the firefox extension build directory
       rimraf.sync(MOZCENTRAL_DIR);
 
@@ -1263,7 +1268,7 @@ gulp.task(
           gulp.dest(MOZCENTRAL_CONTENT_DIR + "web")
         ),
         gulp
-          .src(COMMON_WEB_FILES, { base: "web/" })
+          .src(MOZCENTRAL_WEB_FILES, { base: "web/" })
           .pipe(gulp.dest(MOZCENTRAL_CONTENT_DIR + "web")),
         createCMapBundle().pipe(
           gulp.dest(MOZCENTRAL_CONTENT_DIR + "web/cmaps")
@@ -1329,6 +1334,11 @@ gulp.task(
       const CHROME_BUILD_DIR = BUILD_DIR + "/chromium/",
         CHROME_BUILD_CONTENT_DIR = CHROME_BUILD_DIR + "/content/";
 
+      const CHROME_WEB_FILES = [
+        ...COMMON_WEB_FILES,
+        "!web/images/toolbarButton-openFile.svg",
+      ];
+
       // Clear out everything in the chrome extension build directory
       rimraf.sync(CHROME_BUILD_DIR);
 
@@ -1348,7 +1358,7 @@ gulp.task(
           gulp.dest(CHROME_BUILD_CONTENT_DIR + "web")
         ),
         gulp
-          .src(COMMON_WEB_FILES, { base: "web/" })
+          .src(CHROME_WEB_FILES, { base: "web/" })
           .pipe(gulp.dest(CHROME_BUILD_CONTENT_DIR + "web")),
 
         gulp
@@ -2101,7 +2111,7 @@ function packageBowerJson() {
     bugs: DIST_BUGS_URL,
     license: DIST_LICENSE,
     dependencies: {
-      dommatrix: "^0.0.24",
+      dommatrix: "^1.0.3",
       "web-streams-polyfill": "^3.2.1",
     },
     peerDependencies: {

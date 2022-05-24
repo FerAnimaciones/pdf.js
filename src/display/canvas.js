@@ -32,6 +32,7 @@ import {
   TilingPattern,
 } from "./pattern_helper.js";
 import { applyMaskImageData } from "../shared/image_utils.js";
+import { isNodeJS } from "../shared/is_node.js";
 import { PixelsPerInch } from "./display_utils.js";
 
 // <canvas> contexts store most of the state we need natively.
@@ -377,25 +378,102 @@ class CachedCanvases {
   }
 }
 
+function drawImageAtIntegerCoords(
+  ctx,
+  srcImg,
+  srcX,
+  srcY,
+  srcW,
+  srcH,
+  destX,
+  destY,
+  destW,
+  destH
+) {
+  const [a, b, c, d, tx, ty] = ctx.mozCurrentTransform;
+  if (b === 0 && c === 0) {
+    // top-left corner is at (X, Y) and
+    // bottom-right one is at (X + width, Y + height).
+
+    // If leftX is 4.321 then it's rounded to 4.
+    // If width is 10.432 then it's rounded to 11 because
+    // rightX = leftX + width = 14.753 which is rounded to 15
+    // so after rounding the total width is 11 (15 - 4).
+    // It's why we can't just floor/ceil uniformly, it just depends
+    // on the values we've.
+
+    const tlX = destX * a + tx;
+    const rTlX = Math.round(tlX);
+    const tlY = destY * d + ty;
+    const rTlY = Math.round(tlY);
+    const brX = (destX + destW) * a + tx;
+
+    // Some pdf contains images with 1x1 images so in case of 0-width after
+    // scaling we must fallback on 1 to be sure there is something.
+    const rWidth = Math.abs(Math.round(brX) - rTlX) || 1;
+    const brY = (destY + destH) * d + ty;
+    const rHeight = Math.abs(Math.round(brY) - rTlY) || 1;
+
+    // We must apply a transformation in order to apply it on the image itself.
+    // For example if a == 1 && d == -1, it means that the image itself is
+    // mirrored w.r.t. the x-axis.
+    ctx.setTransform(Math.sign(a), 0, 0, Math.sign(d), rTlX, rTlY);
+    ctx.drawImage(srcImg, srcX, srcY, srcW, srcH, 0, 0, rWidth, rHeight);
+    ctx.setTransform(a, b, c, d, tx, ty);
+
+    return [rWidth, rHeight];
+  }
+
+  if (a === 0 && d === 0) {
+    // This path is taken in issue9462.pdf (page 3).
+    const tlX = destY * c + tx;
+    const rTlX = Math.round(tlX);
+    const tlY = destX * b + ty;
+    const rTlY = Math.round(tlY);
+    const brX = (destY + destH) * c + tx;
+    const rWidth = Math.abs(Math.round(brX) - rTlX) || 1;
+    const brY = (destX + destW) * b + ty;
+    const rHeight = Math.abs(Math.round(brY) - rTlY) || 1;
+
+    ctx.setTransform(0, Math.sign(b), Math.sign(c), 0, rTlX, rTlY);
+    ctx.drawImage(srcImg, srcX, srcY, srcW, srcH, 0, 0, rHeight, rWidth);
+    ctx.setTransform(a, b, c, d, tx, ty);
+
+    return [rHeight, rWidth];
+  }
+
+  // Not a scale matrix so let the render handle the case without rounding.
+  ctx.drawImage(srcImg, srcX, srcY, srcW, srcH, destX, destY, destW, destH);
+
+  const scaleX = Math.hypot(a, b);
+  const scaleY = Math.hypot(c, d);
+  return [scaleX * destW, scaleY * destH];
+}
+
 function compileType3Glyph(imgData) {
+  const { width, height } = imgData;
+  if (
+    !COMPILE_TYPE3_GLYPHS ||
+    width > MAX_SIZE_TO_COMPILE ||
+    height > MAX_SIZE_TO_COMPILE
+  ) {
+    return null;
+  }
+
   const POINT_TO_PROCESS_LIMIT = 1000;
   const POINT_TYPES = new Uint8Array([
     0, 2, 4, 0, 1, 0, 5, 4, 8, 10, 0, 8, 0, 2, 1, 0,
   ]);
 
-  const width = imgData.width,
-    height = imgData.height,
-    width1 = width + 1;
-  let i, ii, j, j0;
-  const points = new Uint8Array(width1 * (height + 1));
+  const width1 = width + 1;
+  let points = new Uint8Array(width1 * (height + 1));
+  let i, j, j0;
 
   // decodes bit-packed mask data
-  const lineSize = (width + 7) & ~7,
-    data0 = imgData.data;
-  const data = new Uint8Array(lineSize * height);
-  let pos = 0;
-  for (i = 0, ii = data0.length; i < ii; i++) {
-    const elem = data0[i];
+  const lineSize = (width + 7) & ~7;
+  let data = new Uint8Array(lineSize * height),
+    pos = 0;
+  for (const elem of imgData.data) {
     let mask = 128;
     while (mask > 0) {
       data[pos++] = elem & mask ? 0 : 255;
@@ -484,7 +562,13 @@ function compileType3Glyph(imgData) {
 
   // building outlines
   const steps = new Int32Array([0, width1, -1, 0, -width1, 0, 0, 0, 1]);
-  const outlines = [];
+  let path, outlines, coords;
+  if (!isNodeJS) {
+    path = new Path2D();
+  } else {
+    outlines = [];
+  }
+
   for (i = 0; count && i <= height; i++) {
     let p = i * width1;
     const end = p + width;
@@ -494,7 +578,12 @@ function compileType3Glyph(imgData) {
     if (p === end) {
       continue;
     }
-    const coords = [p % width1, i];
+
+    if (path) {
+      path.moveTo(p % width1, i);
+    } else {
+      coords = [p % width1, i];
+    }
 
     const p0 = p;
     let type = points[p];
@@ -518,30 +607,44 @@ function compileType3Glyph(imgData) {
         points[p] &= (type >> 2) | (type << 2);
       }
 
-      coords.push(p % width1, (p / width1) | 0);
+      if (path) {
+        path.lineTo(p % width1, (p / width1) | 0);
+      } else {
+        coords.push(p % width1, (p / width1) | 0);
+      }
 
       if (!points[p]) {
         --count;
       }
     } while (p0 !== p);
-    outlines.push(coords);
+
+    if (!path) {
+      outlines.push(coords);
+    }
     --i;
   }
+
+  // Immediately release the, potentially large, `Uint8Array`s after parsing.
+  data = null;
+  points = null;
 
   const drawOutline = function (c) {
     c.save();
     // the path shall be painted in [0..1]x[0..1] space
     c.scale(1 / width, -1 / height);
     c.translate(0, -height);
-    c.beginPath();
-    for (let k = 0, kk = outlines.length; k < kk; k++) {
-      const o = outlines[k];
-      c.moveTo(o[0], o[1]);
-      for (let l = 2, ll = o.length; l < ll; l += 2) {
-        c.lineTo(o[l], o[l + 1]);
+    if (path) {
+      c.fill(path);
+    } else {
+      c.beginPath();
+      for (const o of outlines) {
+        c.moveTo(o[0], o[1]);
+        for (let l = 2, ll = o.length; l < ll; l += 2) {
+          c.lineTo(o[l], o[l + 1]);
+        }
       }
+      c.fill();
     }
-    c.fill();
     c.beginPath();
     c.restore();
   };
@@ -939,9 +1042,8 @@ function copyCtxState(sourceCtx, destCtx) {
   }
 }
 
-function resetCtxToDefault(ctx) {
-  ctx.strokeStyle = "#000000";
-  ctx.fillStyle = "#000000";
+function resetCtxToDefault(ctx, foregroundColor) {
+  ctx.strokeStyle = ctx.fillStyle = foregroundColor || "#000000";
   ctx.fillRule = "nonzero";
   ctx.globalAlpha = 1;
   ctx.lineWidth = 1;
@@ -1109,7 +1211,8 @@ class CanvasGraphics {
     canvasFactory,
     imageLayer,
     optionalContentConfig,
-    annotationCanvasMap
+    annotationCanvasMap,
+    pageColors
   ) {
     this.ctx = canvasCtx;
     this.current = new CanvasExtraState(
@@ -1145,6 +1248,8 @@ class CanvasGraphics {
     this.viewportScale = 1;
     this.outputScaleX = 1;
     this.outputScaleY = 1;
+    this.backgroundColor = pageColors?.background || null;
+    this.foregroundColor = pageColors?.foreground || null;
     if (canvasCtx) {
       // NOTE: if mozCurrentTransform is polyfilled, then the current state of
       // the transformation must already be set in canvasCtx._transformMatrix.
@@ -1177,9 +1282,70 @@ class CanvasGraphics {
     // transparent canvas when we have blend modes.
     const width = this.ctx.canvas.width;
     const height = this.ctx.canvas.height;
-
+    const defaultBackgroundColor = background || "#ffffff";
     this.ctx.save();
-    this.ctx.fillStyle = background || "rgb(255, 255, 255)";
+
+    if (this.foregroundColor && this.backgroundColor) {
+      // Get the #RRGGBB value of the color. If it's a name (e.g. CanvasText)
+      // then it'll be converted to its rgb value.
+      this.ctx.fillStyle = this.foregroundColor;
+      const fg = (this.foregroundColor = this.ctx.fillStyle);
+      this.ctx.fillStyle = this.backgroundColor;
+      const bg = (this.backgroundColor = this.ctx.fillStyle);
+      let isValidDefaultBg = true;
+      let defaultBg = defaultBackgroundColor;
+
+      if (typeof PDFJSDev === "undefined" || !PDFJSDev.test("MOZCENTRAL")) {
+        this.ctx.fillStyle = defaultBackgroundColor;
+        defaultBg = this.ctx.fillStyle;
+        isValidDefaultBg =
+          typeof defaultBg === "string" && /^#[0-9A-Fa-f]{6}$/.test(defaultBg);
+      }
+
+      if (
+        (fg === "#000000" && bg === "#ffffff") ||
+        fg === bg ||
+        !isValidDefaultBg
+      ) {
+        // Ignore the `pageColors`-option when:
+        //  - The computed background/foreground colors have their default
+        //    values, i.e. white/black.
+        //  - The computed background/foreground colors are identical,
+        //    since that'd render the `canvas` mostly blank.
+        //  - The `background`-option has a value that's incompatible with
+        //    the `pageColors`-values.
+        //
+        this.foregroundColor = this.backgroundColor = null;
+      } else {
+        // https://developer.mozilla.org/en-US/docs/Web/Accessibility/Understanding_Colors_and_Luminance
+        //
+        // Relative luminance:
+        // https://www.w3.org/TR/WCAG20/#relativeluminancedef
+        //
+        // We compute the rounded luminance of the default background color.
+        // Then for every color in the pdf, if its rounded luminance is the
+        // same as the background one then it's replaced by the new
+        // background color else by the foreground one.
+        const cB = parseInt(defaultBg.slice(1), 16);
+        const rB = (cB && 0xff0000) >> 16;
+        const gB = (cB && 0x00ff00) >> 8;
+        const bB = cB && 0x0000ff;
+        const newComp = x => {
+          x /= 255;
+          return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+        };
+        const lumB = Math.round(
+          0.2126 * newComp(rB) + 0.7152 * newComp(gB) + 0.0722 * newComp(bB)
+        );
+        this.selectColor = (r, g, b) => {
+          const lumC =
+            0.2126 * newComp(r) + 0.7152 * newComp(g) + 0.0722 * newComp(b);
+          return Math.round(lumC) === lumB ? bg : fg;
+        };
+      }
+    }
+
+    this.ctx.fillStyle = this.backgroundColor || defaultBackgroundColor;
     this.ctx.fillRect(0, 0, width, height);
     this.ctx.restore();
 
@@ -1200,7 +1366,7 @@ class CanvasGraphics {
     }
 
     this.ctx.save();
-    resetCtxToDefault(this.ctx);
+    resetCtxToDefault(this.ctx, this.foregroundColor);
     if (transform) {
       this.ctx.transform.apply(this.ctx, transform);
       this.outputScaleX = transform[0];
@@ -1461,8 +1627,8 @@ class CanvasGraphics {
     const cord1 = Util.applyTransform([0, 0], maskToCanvas);
     const cord2 = Util.applyTransform([width, height], maskToCanvas);
     const rect = Util.normalizeRect([cord1[0], cord1[1], cord2[0], cord2[1]]);
-    const drawnWidth = Math.ceil(rect[2] - rect[0]);
-    const drawnHeight = Math.ceil(rect[3] - rect[1]);
+    const drawnWidth = Math.round(rect[2] - rect[0]) || 1;
+    const drawnHeight = Math.round(rect[3] - rect[1]) || 1;
     const fillCanvas = this.cachedCanvases.getCanvas(
       "fillCanvas",
       drawnWidth,
@@ -1496,7 +1662,9 @@ class CanvasGraphics {
       fillCtx.mozCurrentTransform,
       img.interpolate
     );
-    fillCtx.drawImage(
+
+    drawImageAtIntegerCoords(
+      fillCtx,
       scaled,
       0,
       0,
@@ -2484,8 +2652,6 @@ class CanvasGraphics {
   }
 
   setCharWidthAndBounds(xWidth, yWidth, llx, lly, urx, ury) {
-    // TODO According to the spec we're also suppose to ignore any operators
-    // that set color or include images while processing this type3 font.
     this.ctx.rect(llx, lly, urx - llx, ury - lly);
     this.ctx.clip();
     this.endPath();
@@ -2531,13 +2697,13 @@ class CanvasGraphics {
   }
 
   setStrokeRGBColor(r, g, b) {
-    const color = Util.makeHexColor(r, g, b);
+    const color = this.selectColor?.(r, g, b) || Util.makeHexColor(r, g, b);
     this.ctx.strokeStyle = color;
     this.current.strokeColor = color;
   }
 
   setFillRGBColor(r, g, b) {
-    const color = Util.makeHexColor(r, g, b);
+    const color = this.selectColor?.(r, g, b) || Util.makeHexColor(r, g, b);
     this.ctx.fillStyle = color;
     this.current.fillColor = color;
     this.current.patternFill = false;
@@ -2859,9 +3025,9 @@ class CanvasGraphics {
         this.ctx.setTransform(scaleX, 0, 0, -scaleY, 0, height * scaleY);
         addContextCurrentTransform(this.ctx);
 
-        resetCtxToDefault(this.ctx);
+        resetCtxToDefault(this.ctx, this.foregroundColor);
       } else {
-        resetCtxToDefault(this.ctx);
+        resetCtxToDefault(this.ctx, this.foregroundColor);
 
         this.ctx.rect(rect[0], rect[1], width, height);
         this.ctx.clip();
@@ -2891,28 +3057,22 @@ class CanvasGraphics {
     if (!this.contentVisible) {
       return;
     }
-
     const count = img.count;
     img = this.getObject(img.data, img);
     img.count = count;
 
     const ctx = this.ctx;
-    const width = img.width,
-      height = img.height;
-
     const glyph = this.processingType3;
 
-    if (COMPILE_TYPE3_GLYPHS && glyph && glyph.compiled === undefined) {
-      if (width <= MAX_SIZE_TO_COMPILE && height <= MAX_SIZE_TO_COMPILE) {
-        glyph.compiled = compileType3Glyph({ data: img.data, width, height });
-      } else {
-        glyph.compiled = null;
+    if (glyph) {
+      if (glyph.compiled === undefined) {
+        glyph.compiled = compileType3Glyph(img);
       }
-    }
 
-    if (glyph?.compiled) {
-      glyph.compiled(ctx);
-      return;
+      if (glyph.compiled) {
+        glyph.compiled(ctx);
+        return;
+      }
     }
     const mask = this._createMaskCanvas(img);
     const maskCanvas = mask.canvas;
@@ -3005,7 +3165,18 @@ class CanvasGraphics {
       ctx.save();
       ctx.transform.apply(ctx, image.transform);
       ctx.scale(1, -1);
-      ctx.drawImage(maskCanvas.canvas, 0, 0, width, height, 0, -1, 1, 1);
+      drawImageAtIntegerCoords(
+        ctx,
+        maskCanvas.canvas,
+        0,
+        0,
+        width,
+        height,
+        0,
+        -1,
+        1,
+        1
+      );
       ctx.restore();
     }
     this.compose();
@@ -3085,7 +3256,9 @@ class CanvasGraphics {
       ctx.mozCurrentTransform,
       imgData.interpolate
     );
-    ctx.drawImage(
+
+    const [rWidth, rHeight] = drawImageAtIntegerCoords(
+      ctx,
       scaled.img,
       0,
       0,
@@ -3103,8 +3276,8 @@ class CanvasGraphics {
         imgData,
         left: position[0],
         top: position[1],
-        width: width / ctx.mozCurrentTransformInverse[0],
-        height: height / ctx.mozCurrentTransformInverse[3],
+        width: rWidth,
+        height: rHeight,
       });
     }
     this.compose();
@@ -3133,7 +3306,8 @@ class CanvasGraphics {
       ctx.save();
       ctx.transform.apply(ctx, entry.transform);
       ctx.scale(1, -1);
-      ctx.drawImage(
+      drawImageAtIntegerCoords(
+        ctx,
         tmpCanvas.canvas,
         entry.x,
         entry.y,

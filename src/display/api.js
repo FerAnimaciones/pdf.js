@@ -49,11 +49,6 @@ import {
   StatTimer,
 } from "./display_utils.js";
 import { FontFaceObject, FontLoader } from "./font_loader.js";
-import {
-  NodeCanvasFactory,
-  NodeCMapReaderFactory,
-  NodeStandardFontDataFactory,
-} from "./node_utils.js";
 import { AnnotationStorage } from "./annotation_storage.js";
 import { CanvasGraphics } from "./canvas.js";
 import { GlobalWorkerOptions } from "./worker_options.js";
@@ -67,18 +62,21 @@ import { XfaText } from "./xfa_text.js";
 const DEFAULT_RANGE_CHUNK_SIZE = 65536; // 2^16 = 65536
 const RENDERING_CANCELLED_TIMEOUT = 100; // ms
 
-const DefaultCanvasFactory =
-  (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) && isNodeJS
-    ? NodeCanvasFactory
-    : DOMCanvasFactory;
-const DefaultCMapReaderFactory =
-  (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) && isNodeJS
-    ? NodeCMapReaderFactory
-    : DOMCMapReaderFactory;
-const DefaultStandardFontDataFactory =
-  (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) && isNodeJS
-    ? NodeStandardFontDataFactory
-    : DOMStandardFontDataFactory;
+let DefaultCanvasFactory = DOMCanvasFactory;
+let DefaultCMapReaderFactory = DOMCMapReaderFactory;
+let DefaultStandardFontDataFactory = DOMStandardFontDataFactory;
+
+if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("GENERIC") && isNodeJS) {
+  const {
+    NodeCanvasFactory,
+    NodeCMapReaderFactory,
+    NodeStandardFontDataFactory,
+  } = require("./node_utils.js");
+
+  DefaultCanvasFactory = NodeCanvasFactory;
+  DefaultCMapReaderFactory = NodeCMapReaderFactory;
+  DefaultStandardFontDataFactory = NodeStandardFontDataFactory;
+}
 
 /**
  * @typedef {function} IPDFStreamFactory
@@ -355,15 +353,10 @@ function getDocument(src) {
     params.isEvalSupported = true;
   }
   if (typeof params.disableFontFace !== "boolean") {
-    params.disableFontFace =
-      (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) && isNodeJS;
+    params.disableFontFace = isNodeJS;
   }
   if (typeof params.useSystemFonts !== "boolean") {
-    params.useSystemFonts =
-      !(
-        (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) &&
-        isNodeJS
-      ) && !params.disableFontFace;
+    params.useSystemFonts = !isNodeJS && !params.disableFontFace;
   }
   if (
     typeof params.ownerDocument !== "object" ||
@@ -1169,6 +1162,12 @@ class PDFDocumentProxy {
  *   <color> value, a `CanvasGradient` object (a linear or radial gradient) or
  *   a `CanvasPattern` object (a repetitive image). The default value is
  *   'rgb(255,255,255)'.
+ *
+ *   NOTE: This option may be partially, or completely, ignored when the
+ *   `pageColors`-option is used.
+ * @property {Object} [pageColors] - Overwrites background and foreground colors
+ *   with user defined ones in order to improve readability in high contrast
+ *   mode.
  * @property {Promise<OptionalContentConfig>} [optionalContentConfigPromise] -
  *   A promise that should resolve with an {@link OptionalContentConfig}
  *   created from `PDFDocumentProxy.getOptionalContentConfig`. If `null`,
@@ -1393,6 +1392,7 @@ class PDFPageProxy {
     background = null,
     optionalContentConfigPromise = null,
     annotationCanvasMap = null,
+    pageColors = null,
   }) {
     if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("GENERIC")) {
       if (arguments[0]?.renderInteractiveForms !== undefined) {
@@ -1516,6 +1516,7 @@ class PDFPageProxy {
       canvasFactory: canvasFactoryInstance,
       useRequestAnimationFrame: !intentPrint,
       pdfBug: this._pdfBug,
+      pageColors,
     });
 
     (intentState.renderTasks ||= new Set()).add(internalRenderTask);
@@ -2402,7 +2403,7 @@ class WorkerTransport {
     isOpList = false
   ) {
     let renderingIntent = RenderingIntentFlag.DISPLAY; // Default value.
-    let lastModified = "";
+    let annotationHash = "";
 
     switch (intent) {
       case "any":
@@ -2429,7 +2430,7 @@ class WorkerTransport {
       case AnnotationMode.ENABLE_STORAGE:
         renderingIntent += RenderingIntentFlag.ANNOTATIONS_STORAGE;
 
-        lastModified = this.annotationStorage.lastModified;
+        annotationHash = this.annotationStorage.hash;
         break;
       default:
         warn(`getRenderingIntent - invalid annotationMode: ${annotationMode}`);
@@ -2441,7 +2442,7 @@ class WorkerTransport {
 
     return {
       renderingIntent,
-      cacheKey: `${renderingIntent}_${lastModified}`,
+      cacheKey: `${renderingIntent}_${annotationHash}`,
     };
   }
 
@@ -3219,6 +3220,7 @@ class InternalRenderTask {
     canvasFactory,
     useRequestAnimationFrame = false,
     pdfBug = false,
+    pageColors = null,
   }) {
     this.callback = callback;
     this.params = params;
@@ -3230,6 +3232,7 @@ class InternalRenderTask {
     this._pageIndex = pageIndex;
     this.canvasFactory = canvasFactory;
     this._pdfBug = pdfBug;
+    this.pageColors = pageColors;
 
     this.running = false;
     this.graphicsReadyCallback = null;
@@ -3284,7 +3287,8 @@ class InternalRenderTask {
       this.canvasFactory,
       imageLayer,
       optionalContentConfig,
-      this.annotationCanvasMap
+      this.annotationCanvasMap,
+      this.pageColors
     );
     this.gfx.beginDrawing({
       transform,
