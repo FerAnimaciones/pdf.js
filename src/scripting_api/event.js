@@ -91,9 +91,7 @@ class EventDispatcher {
       } else if (id === "app" && baseEvent.name === "ResetForm") {
         for (const fieldId of baseEvent.ids) {
           const obj = this._objects[fieldId];
-          if (obj) {
-            obj.obj._reset();
-          }
+          obj?.obj._reset();
         }
       }
       return;
@@ -163,6 +161,7 @@ class EventDispatcher {
         }
         source.obj._send({
           id: source.obj._id,
+          siblings: source.obj._siblings,
           value,
           selRange: [selStart, selEnd],
         });
@@ -170,6 +169,7 @@ class EventDispatcher {
     } else if (!event.willCommit) {
       source.obj._send({
         id: source.obj._id,
+        siblings: source.obj._siblings,
         value: savedChange.value,
         selRange: [savedChange.selStart, savedChange.selEnd],
       });
@@ -178,6 +178,7 @@ class EventDispatcher {
       // so just clear the field.
       source.obj._send({
         id: source.obj._id,
+        siblings: source.obj._siblings,
         value: "",
         formattedValue: null,
         selRange: [0, 0],
@@ -193,6 +194,7 @@ class EventDispatcher {
       if (this.runActions(source, source, event, "Format")) {
         source.obj._send({
           id: source.obj._id,
+          siblings: source.obj._siblings,
           formattedValue: event.value?.toString?.(),
         });
       }
@@ -215,6 +217,7 @@ class EventDispatcher {
 
       source.obj._send({
         id: source.obj._id,
+        siblings: source.obj._siblings,
         value: savedValue,
         formattedValue,
       });
@@ -223,6 +226,7 @@ class EventDispatcher {
       // The value is not valid.
       source.obj._send({
         id: source.obj._id,
+        siblings: source.obj._siblings,
         value: "",
         formattedValue: null,
         selRange: [0, 0],
@@ -320,6 +324,7 @@ class EventDispatcher {
 
       target.obj._send({
         id: target.obj._id,
+        siblings: target.obj._siblings,
         value: savedValue,
         formattedValue,
       });

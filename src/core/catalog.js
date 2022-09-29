@@ -302,7 +302,7 @@ class Catalog {
         throw new FormatError("Invalid outline item encountered.");
       }
 
-      const data = { url: null, dest: null };
+      const data = { url: null, dest: null, action: null };
       Catalog.parseDestDictionary({
         destDict: outlineDict,
         resultObj: data,
@@ -324,10 +324,12 @@ class Catalog {
       }
 
       const outlineItem = {
+        action: data.action,
         dest: data.dest,
         url: data.url,
         unsafeUrl: data.unsafeUrl,
         newWindow: data.newWindow,
+        setOCGState: data.setOCGState,
         title: stringToPDFString(title),
         color: rgbColor,
         count: Number.isInteger(count) ? count : undefined,
@@ -982,7 +984,8 @@ class Catalog {
       if (javaScript === null) {
         javaScript = new Map();
       }
-      javaScript.set(name, stringToPDFString(js));
+      js = stringToPDFString(js).replace(/\u0000/g, "");
+      javaScript.set(name, js);
     }
 
     if (obj instanceof Dict && obj.has("JavaScript")) {
@@ -1212,7 +1215,7 @@ class Catalog {
     }
 
     while (queue.length > 0) {
-      const queueItem = queue[queue.length - 1];
+      const queueItem = queue.at(-1);
       const { currentNode, posInKids } = queueItem;
 
       let kids = currentNode.getRaw("Kids");
@@ -1529,6 +1532,38 @@ class Catalog {
           if (namedAction instanceof Name) {
             resultObj.action = namedAction.name;
           }
+          break;
+
+        case "SetOCGState":
+          const state = action.get("State");
+          const preserveRB = action.get("PreserveRB");
+
+          if (!Array.isArray(state) || state.length === 0) {
+            break;
+          }
+          const stateArr = [];
+
+          for (const elem of state) {
+            if (elem instanceof Name) {
+              switch (elem.name) {
+                case "ON":
+                case "OFF":
+                case "Toggle":
+                  stateArr.push(elem.name);
+                  break;
+              }
+            } else if (elem instanceof Ref) {
+              stateArr.push(elem.toString());
+            }
+          }
+
+          if (stateArr.length !== state.length) {
+            break; // Some of the original entries are not valid.
+          }
+          resultObj.setOCGState = {
+            state: stateArr,
+            preserveRB: typeof preserveRB === "boolean" ? preserveRB : true,
+          };
           break;
 
         case "JavaScript":

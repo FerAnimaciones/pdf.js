@@ -120,6 +120,7 @@ describe("Scripting", function () {
       expect(send_queue.has(refId)).toEqual(true);
       expect(send_queue.get(refId)).toEqual({
         id: refId,
+        siblings: null,
         value: expected,
         formattedValue: null,
       });
@@ -369,6 +370,7 @@ describe("Scripting", function () {
       expect(send_queue.has(refId)).toEqual(true);
       expect(send_queue.get(refId)).toEqual({
         id: refId,
+        siblings: null,
         value: "hell",
         selRange: [4, 4],
       });
@@ -406,6 +408,7 @@ describe("Scripting", function () {
       expect(send_queue.has(refId)).toEqual(true);
       expect(send_queue.get(refId)).toEqual({
         id: refId,
+        siblings: null,
         value: "hella",
         selRange: [5, 5],
       });
@@ -479,6 +482,7 @@ describe("Scripting", function () {
       expect(send_queue.has(refId1)).toEqual(true);
       expect(send_queue.get(refId1)).toEqual({
         id: refId1,
+        siblings: null,
         value: "world",
         formattedValue: null,
       });
@@ -604,14 +608,23 @@ describe("Scripting", function () {
       it("should parse a date with a format", async () => {
         const check = async (date, format, expected) => {
           const value = await myeval(
-            `AFParseDateEx("${date}", "${format}").toISOString()`
+            `AFParseDateEx("${date}", "${format}").toISOString().replace(/T.*$/, "")`
           );
-          expect(value).toEqual(new Date(expected).toISOString());
+          expect(value).toEqual(
+            new Date(expected).toISOString().replace(/T.*$/, "")
+          );
         };
 
         await check("05", "dd", "2000/01/05");
         await check("12", "mm", "2000/12/01");
         await check("2022", "yyyy", "2022/01/01");
+        await check("a1$9bbbb21", "dd/mm/yyyy", "2021/09/01");
+
+        // The following test isn't working as expected because
+        // the quickjs date parser has been replaced by the browser one
+        // and the date "1.9.2021" is valid in Chrome but not in Firefox.
+        // The supported date format is not specified...
+        // await check("1.9.2021", "dd/mm/yyyy", "2021/09/01");
       });
     });
 
@@ -800,6 +813,7 @@ describe("Scripting", function () {
         expect(send_queue.has(refId)).toEqual(true);
         expect(send_queue.get(refId)).toEqual({
           id: refId,
+          siblings: null,
           value: "123456.789",
           formattedValue: null,
         });
@@ -979,6 +993,7 @@ describe("Scripting", function () {
         expect(send_queue.has(refId)).toEqual(true);
         expect(send_queue.get(refId)).toEqual({
           id: refId,
+          siblings: null,
           value: "321",
           formattedValue: null,
         });
@@ -1055,7 +1070,7 @@ describe("Scripting", function () {
                 value: "",
                 actions: {
                   Calculate: [
-                    `AFSimple_Calculate("SUM", ["field1", "field2", "field3"]);`,
+                    `AFSimple_Calculate("SUM", ["field1", "field2", "field3", "unknown"]);`,
                   ],
                 },
                 type: "text",
@@ -1077,6 +1092,7 @@ describe("Scripting", function () {
         expect(send_queue.has(refIds[3])).toEqual(true);
         expect(send_queue.get(refIds[3])).toEqual({
           id: refIds[3],
+          siblings: null,
           value: 1,
           formattedValue: null,
         });
@@ -1090,6 +1106,7 @@ describe("Scripting", function () {
         expect(send_queue.has(refIds[3])).toEqual(true);
         expect(send_queue.get(refIds[3])).toEqual({
           id: refIds[3],
+          siblings: null,
           value: 3,
           formattedValue: null,
         });
@@ -1103,6 +1120,7 @@ describe("Scripting", function () {
         expect(send_queue.has(refIds[3])).toEqual(true);
         expect(send_queue.get(refIds[3])).toEqual({
           id: refIds[3],
+          siblings: null,
           value: 6,
           formattedValue: null,
         });
@@ -1178,6 +1196,7 @@ describe("Scripting", function () {
         expect(send_queue.has(refId)).toEqual(true);
         expect(send_queue.get(refId)).toEqual({
           id: refId,
+          siblings: null,
           value: "3F?",
           selRange: [3, 3],
         });
@@ -1206,6 +1225,7 @@ describe("Scripting", function () {
         expect(send_queue.has(refId)).toEqual(true);
         expect(send_queue.get(refId)).toEqual({
           id: refId,
+          siblings: null,
           value: "3F?0",
           formattedValue: null,
         });
@@ -1266,6 +1286,7 @@ describe("Scripting", function () {
         expect(send_queue.has(refId)).toEqual(true);
         expect(send_queue.get(refId)).toEqual({
           id: refId,
+          siblings: null,
           value,
           selRange: [i, i],
         });
@@ -1326,6 +1347,7 @@ describe("Scripting", function () {
         expect(send_queue.has(refId)).toEqual(true);
         expect(send_queue.get(refId)).toEqual({
           id: refId,
+          siblings: null,
           value,
           selRange: [i, i],
         });
@@ -1386,6 +1408,7 @@ describe("Scripting", function () {
         expect(send_queue.has(refId)).toEqual(true);
         expect(send_queue.get(refId)).toEqual({
           id: refId,
+          siblings: null,
           value,
           selRange: [i, i],
         });

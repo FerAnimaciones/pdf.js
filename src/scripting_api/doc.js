@@ -18,6 +18,8 @@ import { PDFObject } from "./pdf_object.js";
 import { PrintParams } from "./print_params.js";
 import { ZoomType } from "./constants.js";
 
+const DOC_EXTERNAL = false;
+
 class InfoProxyHandler {
   static get(obj, prop) {
     return obj[prop.toLowerCase()];
@@ -272,7 +274,10 @@ class Doc extends PDFObject {
   }
 
   get external() {
-    return true;
+    // According to the specification this should be `true` in non-Acrobat
+    // applications, however we ignore that to avoid bothering users with
+    // an `alert`-dialog on document load (see issue 15509).
+    return DOC_EXTERNAL;
   }
 
   set external(_) {
@@ -876,7 +881,7 @@ class Doc extends PDFObject {
     for (const [name, field] of this._fields.entries()) {
       if (name.startsWith(fieldName)) {
         const finalPart = name.slice(len);
-        if (finalPart.match(pattern)) {
+        if (pattern.test(finalPart)) {
           children.push(field);
         }
       }
@@ -950,10 +955,9 @@ class Doc extends PDFObject {
   }
 
   getPrintParams() {
-    if (!this._printParams) {
-      this._printParams = new PrintParams({ lastPage: this._numPages - 1 });
-    }
-    return this._printParams;
+    return (this._printParams ||= new PrintParams({
+      lastPage: this._numPages - 1,
+    }));
   }
 
   getSound() {
@@ -1151,6 +1155,7 @@ class Doc extends PDFObject {
       field.obj.value = field.obj.defaultValue;
       this._send({
         id: field.obj._id,
+        siblings: field.obj._siblings,
         value: field.obj.defaultValue,
         formattedValue: null,
         selRange: [0, 0],

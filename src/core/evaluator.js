@@ -1176,10 +1176,9 @@ class PartialEvaluator {
     let fontRef;
     if (font) {
       // Loading by ref.
-      if (!(font instanceof Ref)) {
-        throw new FormatError('The "font" object should be a reference.');
+      if (font instanceof Ref) {
+        fontRef = font;
       }
-      fontRef = font;
     } else {
       // Loading by name.
       const fontRes = resources.get("Font");
@@ -1360,7 +1359,6 @@ class PartialEvaluator {
     if (!args) {
       args = [];
     }
-    let minMax;
     if (
       lastIndex < 0 ||
       operatorList.fnArray[lastIndex] !== OPS.constructPath
@@ -1377,7 +1375,26 @@ class PartialEvaluator {
         operatorList.addOp(OPS.save, null);
       }
 
-      minMax = [Infinity, -Infinity, Infinity, -Infinity];
+      let minMax;
+      switch (fn) {
+        case OPS.rectangle:
+          const x = args[0] + args[2];
+          const y = args[1] + args[3];
+          minMax = [
+            Math.min(args[0], x),
+            Math.max(args[0], x),
+            Math.min(args[1], y),
+            Math.max(args[1], y),
+          ];
+          break;
+        case OPS.moveTo:
+        case OPS.lineTo:
+          minMax = [args[0], args[0], args[1], args[1]];
+          break;
+        default:
+          minMax = [Infinity, -Infinity, Infinity, -Infinity];
+          break;
+      }
       operatorList.addOp(OPS.constructPath, [[fn], args, minMax]);
 
       if (parsingText) {
@@ -1386,29 +1403,31 @@ class PartialEvaluator {
     } else {
       const opArgs = operatorList.argsArray[lastIndex];
       opArgs[0].push(fn);
-      Array.prototype.push.apply(opArgs[1], args);
-      minMax = opArgs[2];
-    }
+      opArgs[1].push(...args);
+      const minMax = opArgs[2];
 
-    // Compute min/max in the worker instead of the main thread.
-    // If the current matrix (when drawing) is a scaling one
-    // then min/max can be easily computed in using those values.
-    // Only rectangle, lineTo and moveTo are handled here since
-    // Bezier stuff requires to have the starting point.
-    switch (fn) {
-      case OPS.rectangle:
-        minMax[0] = Math.min(minMax[0], args[0], args[0] + args[2]);
-        minMax[1] = Math.max(minMax[1], args[0], args[0] + args[2]);
-        minMax[2] = Math.min(minMax[2], args[1], args[1] + args[3]);
-        minMax[3] = Math.max(minMax[3], args[1], args[1] + args[3]);
-        break;
-      case OPS.moveTo:
-      case OPS.lineTo:
-        minMax[0] = Math.min(minMax[0], args[0]);
-        minMax[1] = Math.max(minMax[1], args[0]);
-        minMax[2] = Math.min(minMax[2], args[1]);
-        minMax[3] = Math.max(minMax[3], args[1]);
-        break;
+      // Compute min/max in the worker instead of the main thread.
+      // If the current matrix (when drawing) is a scaling one
+      // then min/max can be easily computed in using those values.
+      // Only rectangle, lineTo and moveTo are handled here since
+      // Bezier stuff requires to have the starting point.
+      switch (fn) {
+        case OPS.rectangle:
+          const x = args[0] + args[2];
+          const y = args[1] + args[3];
+          minMax[0] = Math.min(minMax[0], args[0], x);
+          minMax[1] = Math.max(minMax[1], args[0], x);
+          minMax[2] = Math.min(minMax[2], args[1], y);
+          minMax[3] = Math.max(minMax[3], args[1], y);
+          break;
+        case OPS.moveTo:
+        case OPS.lineTo:
+          minMax[0] = Math.min(minMax[0], args[0]);
+          minMax[1] = Math.max(minMax[1], args[0]);
+          minMax[2] = Math.min(minMax[2], args[1]);
+          minMax[3] = Math.max(minMax[3], args[1]);
+          break;
+      }
     }
   }
 
@@ -1891,17 +1910,11 @@ class PartialEvaluator {
               self.ensureStateFont(stateManager.state);
               continue;
             }
-            var arr = args[0];
             var combinedGlyphs = [];
-            var arrLength = arr.length;
             var state = stateManager.state;
-            for (i = 0; i < arrLength; ++i) {
-              const arrItem = arr[i];
+            for (const arrItem of args[0]) {
               if (typeof arrItem === "string") {
-                Array.prototype.push.apply(
-                  combinedGlyphs,
-                  self.handleText(arrItem, state)
-                );
+                combinedGlyphs.push(...self.handleText(arrItem, state));
               } else if (typeof arrItem === "number") {
                 combinedGlyphs.push(arrItem);
               }
@@ -3066,7 +3079,7 @@ class PartialEvaluator {
               }
             }
 
-            const item = elements[elements.length - 1];
+            const item = elements.at(-1);
             if (typeof item === "string") {
               showSpacedTextBuffer.push(item);
             }
@@ -3290,6 +3303,7 @@ class PartialEvaluator {
             );
             return;
           case OPS.beginMarkedContent:
+            flushTextContentItem();
             if (includeMarkedContent) {
               textContent.items.push({
                 type: "beginMarkedContent",
@@ -3298,8 +3312,8 @@ class PartialEvaluator {
             }
             break;
           case OPS.beginMarkedContentProps:
+            flushTextContentItem();
             if (includeMarkedContent) {
-              flushTextContentItem();
               let mcid = null;
               if (args[1] instanceof Dict) {
                 mcid = args[1].get("MCID");
@@ -3314,8 +3328,8 @@ class PartialEvaluator {
             }
             break;
           case OPS.endMarkedContent:
+            flushTextContentItem();
             if (includeMarkedContent) {
-              flushTextContentItem();
               textContent.items.push({
                 type: "endMarkedContent",
               });
@@ -3373,9 +3387,16 @@ class PartialEvaluator {
         };
       }
 
-      const cidToGidMap = dict.get("CIDToGIDMap");
-      if (cidToGidMap instanceof BaseStream) {
-        cidToGidBytes = cidToGidMap.getBytes();
+      try {
+        const cidToGidMap = dict.get("CIDToGIDMap");
+        if (cidToGidMap instanceof BaseStream) {
+          cidToGidBytes = cidToGidMap.getBytes();
+        }
+      } catch (ex) {
+        if (!this.options.ignoreErrors) {
+          throw ex;
+        }
+        warn(`extractDataStructures - ignoring CIDToGIDMap data: "${ex}".`);
       }
     }
 
@@ -3710,7 +3731,7 @@ class PartialEvaluator {
               const w2 = (token.charCodeAt(k) << 8) | token.charCodeAt(k + 1);
               str.push(((w1 & 0x3ff) << 10) + (w2 & 0x3ff) + 0x10000);
             }
-            map[charCode] = String.fromCodePoint.apply(String, str);
+            map[charCode] = String.fromCodePoint(...str);
           });
           return new ToUnicodeMap(map);
         },
@@ -3859,8 +3880,7 @@ class PartialEvaluator {
     // Simulating descriptor flags attribute
     const fontNameWoStyle = baseFontName.split("-")[0];
     return (
-      fontNameWoStyle in getSerifFonts() ||
-      fontNameWoStyle.search(/serif/gi) !== -1
+      fontNameWoStyle in getSerifFonts() || /serif/gi.test(fontNameWoStyle)
     );
   }
 
@@ -4403,8 +4423,10 @@ class TranslatedFont {
     const fontResources = this.dict.get("Resources") || resources;
     const charProcOperatorList = Object.create(null);
 
-    const isEmptyBBox =
-      !translatedFont.bbox || isArrayEqual(translatedFont.bbox, [0, 0, 0, 0]);
+    const fontBBox = Util.normalizeRect(translatedFont.bbox || [0, 0, 0, 0]),
+      width = fontBBox[2] - fontBBox[0],
+      height = fontBBox[3] - fontBBox[1];
+    const fontBBoxSize = Math.hypot(width, height);
 
     for (const key of charProcs.getKeys()) {
       loadCharProcsPromise = loadCharProcsPromise.then(() => {
@@ -4425,7 +4447,7 @@ class TranslatedFont {
             //   colour-related parameters) in the graphics state;
             //   any use of such operators shall be ignored."
             if (operatorList.fnArray[0] === OPS.setCharWidthAndBounds) {
-              this._removeType3ColorOperators(operatorList, isEmptyBBox);
+              this._removeType3ColorOperators(operatorList, fontBBoxSize);
             }
             charProcOperatorList[key] = operatorList.getIR();
 
@@ -4453,7 +4475,7 @@ class TranslatedFont {
   /**
    * @private
    */
-  _removeType3ColorOperators(operatorList, isEmptyBBox = false) {
+  _removeType3ColorOperators(operatorList, fontBBoxSize = NaN) {
     if (
       typeof PDFJSDev === "undefined" ||
       PDFJSDev.test("!PRODUCTION || TESTING")
@@ -4466,12 +4488,19 @@ class TranslatedFont {
     const charBBox = Util.normalizeRect(operatorList.argsArray[0].slice(2)),
       width = charBBox[2] - charBBox[0],
       height = charBBox[3] - charBBox[1];
+    const charBBoxSize = Math.hypot(width, height);
 
     if (width === 0 || height === 0) {
       // Skip the d1 operator when its bounds are bogus (fixes issue14953.pdf).
       operatorList.fnArray.splice(0, 1);
       operatorList.argsArray.splice(0, 1);
-    } else if (isEmptyBBox) {
+    } else if (
+      fontBBoxSize === 0 ||
+      Math.round(charBBoxSize / fontBBoxSize) >= 10
+    ) {
+      // Override the fontBBox when it's undefined/empty, or when it's at least
+      // (approximately) one order of magnitude smaller than the charBBox
+      // (fixes issue14999_reduced.pdf).
       if (!this._bbox) {
         this._bbox = [Infinity, Infinity, -Infinity, -Infinity];
       }

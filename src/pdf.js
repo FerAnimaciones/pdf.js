@@ -19,8 +19,12 @@
 /** @typedef {import("./display/api").PDFPageProxy} PDFPageProxy */
 /** @typedef {import("./display/api").RenderTask} RenderTask */
 /** @typedef {import("./display/display_utils").PageViewport} PageViewport */
+// eslint-disable-next-line max-len
+/** @typedef {import("./display/text_layer").TextLayerRenderTask} TextLayerRenderTask */
 
 import {
+  AnnotationEditorParamsType,
+  AnnotationEditorType,
   AnnotationMode,
   CMapCompressionType,
   createPromiseCapability,
@@ -39,7 +43,6 @@ import {
 import {
   build,
   getDocument,
-  LoopbackPort,
   PDFDataRangeTransport,
   PDFWorker,
   setPDFNetworkStreamFactory,
@@ -56,6 +59,8 @@ import {
   PixelsPerInch,
   RenderingCancelledException,
 } from "./display/display_utils.js";
+import { AnnotationEditorLayer } from "./display/editor/annotation_editor_layer.js";
+import { AnnotationEditorUIManager } from "./display/editor/tools.js";
 import { AnnotationLayer } from "./display/annotation_layer.js";
 import { GlobalWorkerOptions } from "./display/worker_options.js";
 import { isNodeJS } from "./shared/is_node.js";
@@ -104,6 +109,10 @@ if (typeof PDFJSDev === "undefined" || !PDFJSDev.test("PRODUCTION")) {
 }
 
 export {
+  AnnotationEditorLayer,
+  AnnotationEditorParamsType,
+  AnnotationEditorType,
+  AnnotationEditorUIManager,
   AnnotationLayer,
   AnnotationMode,
   build,
@@ -118,7 +127,6 @@ export {
   InvalidPDFException,
   isPdfFile,
   loadScript,
-  LoopbackPort,
   MissingPDFException,
   OPS,
   PasswordResponses,

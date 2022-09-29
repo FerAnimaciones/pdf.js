@@ -50,6 +50,8 @@
 !issue7439.pdf
 !issue7847_radial.pdf
 !issue14953.pdf
+!issue15367.pdf
+!issue15372.pdf
 !issue7446.pdf
 !issue7492.pdf
 !issue7544.pdf
@@ -121,6 +123,7 @@
 !issue13916.pdf
 !issue14023.pdf
 !issue14438.pdf
+!issue14999_reduced.pdf
 !bad-PageLabels.pdf
 !decodeACSuccessive.pdf
 !issue13003.pdf
@@ -467,6 +470,7 @@
 !issue11656.pdf
 !annotation-fileattachment.pdf
 !annotation-text-widget.pdf
+!issue15443.pdf
 !annotation-choice-widget.pdf
 !issue10900.pdf
 !annotation-button-widget.pdf
@@ -480,11 +484,13 @@
 !issue11442_reduced.pdf
 !issue11549_reduced.pdf
 !issue8097_reduced.pdf
+!issue15262.pdf
 !bug1743245.pdf
 !quadpoints.pdf
 !transparent.pdf
 !issue13931.pdf
 !xobject-image.pdf
+!issue15441.pdf
 !issue6605.pdf
 !ccitt_EndOfBlock_false.pdf
 !issue9972-1.pdf
@@ -507,6 +513,8 @@
 !xfa_issue14315.pdf
 !poppler-67295-0.pdf
 !poppler-85140-0.pdf
+!issue15012.pdf
+!issue15150.pdf
 !poppler-395-0-fuzzed.pdf
 !GHOSTSCRIPT-698804-1-fuzzed.pdf
 !issue14814.pdf
@@ -524,3 +532,12 @@
 !issue14627.pdf
 !issue14862.pdf
 !issue14705.pdf
+!bug1771477.pdf
+!bug1724918.pdf
+!issue15053.pdf
+!bug1675139.pdf
+!issue15092.pdf
+!bug1782186.pdf
+!tracemonkey_a11y.pdf
+!bug1782564.pdf
+!issue15340.pdf
