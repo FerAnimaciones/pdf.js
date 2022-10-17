@@ -49,6 +49,7 @@
 !issue7426.pdf
 !issue7439.pdf
 !issue7847_radial.pdf
+!issue8844.pdf
 !issue14953.pdf
 !issue15367.pdf
 !issue15372.pdf
@@ -108,6 +109,7 @@
 !issue10542_reduced.pdf
 !issue10665_reduced.pdf
 !issue11016_reduced.pdf
+!issue15516_reduced.pdf
 !issue11045.pdf
 !bug1057544.pdf
 !issue11150_reduced.pdf
@@ -364,6 +366,7 @@
 !issue1045.pdf
 !issue5010.pdf
 !issue10339_reduced.pdf
+!issue15557.pdf
 !issue4934.pdf
 !issue4650.pdf
 !issue6721_reduced.pdf
@@ -541,3 +544,4 @@
 !tracemonkey_a11y.pdf
 !bug1782564.pdf
 !issue15340.pdf
+!bug1795263.pdf

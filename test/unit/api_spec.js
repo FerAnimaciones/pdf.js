@@ -15,6 +15,7 @@
 
 import {
   AnnotationMode,
+  AnnotationType,
   createPromiseCapability,
   FontType,
   ImageKind,
@@ -1536,6 +1537,7 @@ describe("api", function () {
 
       expect(outline[4]).toEqual({
         action: null,
+        attachment: undefined,
         dest: "Händel -- Halle🎆lujah",
         url: null,
         unsafeUrl: undefined,
@@ -1562,6 +1564,7 @@ describe("api", function () {
 
       expect(outline[1]).toEqual({
         action: "PrevPage",
+        attachment: undefined,
         dest: null,
         url: null,
         unsafeUrl: undefined,
@@ -1588,6 +1591,7 @@ describe("api", function () {
 
       expect(outline[0]).toEqual({
         action: null,
+        attachment: undefined,
         dest: null,
         url: null,
         unsafeUrl: undefined,
@@ -2155,6 +2159,23 @@ describe("api", function () {
       ]);
     });
 
+    it("gets annotations containing GoToE action (issue 8844)", async function () {
+      const loadingTask = getDocument(buildGetDocumentParams("issue8844.pdf"));
+      const pdfDoc = await loadingTask.promise;
+      const pdfPage = await pdfDoc.getPage(1);
+      const annotations = await pdfPage.getAnnotations();
+
+      expect(annotations.length).toEqual(1);
+      expect(annotations[0].annotationType).toEqual(AnnotationType.LINK);
+
+      const { filename, content } = annotations[0].attachment;
+      expect(filename).toEqual("man.pdf");
+      expect(content instanceof Uint8Array).toEqual(true);
+      expect(content.length).toEqual(4508);
+
+      await loadingTask.destroy();
+    });
+
     it("gets text content", async function () {
       const defaultPromise = page.getTextContent();
       const parametersPromise = page.getTextContent({
@@ -2413,6 +2434,23 @@ Caron Broadcasting, Inc., an Ohio corporation (“Lessee”).`)
       const textWithMC = mergeText(items);
 
       expect(textWithoutMC).toEqual(textWithMC);
+
+      await loadingTask.destroy();
+    });
+
+    // TODO: Change this to a `text` reference test instead.
+    //       Currently that doesn't work, since the `XMLSerializer` fails on
+    //       the ASCII "control characters" found in the text-content.
+    it("gets text content with non-standard ligatures (issue issue15516)", async function () {
+      const loadingTask = getDocument(
+        buildGetDocumentParams("issue15516_reduced.pdf")
+      );
+      const pdfDoc = await loadingTask.promise;
+      const pdfPage = await pdfDoc.getPage(1);
+      const { items } = await pdfPage.getTextContent();
+      const text = mergeText(items);
+
+      expect(text).toEqual("ffi fi ffl ff fl \x07 \x08 Ý");
 
       await loadingTask.destroy();
     });

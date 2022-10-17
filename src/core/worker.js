@@ -27,7 +27,6 @@ import {
   stringToPDFString,
   UnexpectedResponseException,
   UnknownErrorException,
-  UNSUPPORTED_FEATURES,
   VerbosityLevel,
   warn,
 } from "../shared/util.js";
@@ -97,7 +96,7 @@ class WorkerMessageHandler {
     const WorkerTasks = [];
     const verbosity = getVerbosityLevel();
 
-    const apiVersion = docParams.apiVersion;
+    const { docId, apiVersion } = docParams;
     const workerVersion =
       typeof PDFJSDev !== "undefined" && !PDFJSDev.test("TESTING")
         ? PDFJSDev.eval("BUNDLE_VERSION")
@@ -142,10 +141,7 @@ class WorkerMessageHandler {
         throw new Error(partialMsg + "please update to a supported browser.");
       }
     }
-
-    const docId = docParams.docId;
-    const docBaseUrl = docParams.docBaseUrl;
-    const workerHandlerName = docParams.docId + "_worker";
+    const workerHandlerName = docId + "_worker";
     let handler = new MessageHandler(workerHandlerName, docId, port);
 
     function ensureNotTerminated() {
@@ -204,17 +200,25 @@ class WorkerMessageHandler {
       return { numPages, fingerprints, htmlForXfa };
     }
 
-    function getPdfManager(data, evaluatorOptions, enableXfa) {
+    function getPdfManager({
+      data,
+      password,
+      disableAutoFetch,
+      rangeChunkSize,
+      length,
+      docBaseUrl,
+      enableXfa,
+      evaluatorOptions,
+    }) {
       const pdfManagerCapability = createPromiseCapability();
       let newPdfManager;
 
-      const source = data.source;
-      if (source.data) {
+      if (data) {
         try {
           newPdfManager = new LocalPdfManager(
             docId,
-            source.data,
-            source.password,
+            data,
+            password,
             handler,
             evaluatorOptions,
             enableXfa,
@@ -242,19 +246,19 @@ class WorkerMessageHandler {
           if (!fullRequest.isRangeSupported) {
             return;
           }
-
           // We don't need auto-fetch when streaming is enabled.
-          const disableAutoFetch =
-            source.disableAutoFetch || fullRequest.isStreamingSupported;
+          disableAutoFetch =
+            disableAutoFetch || fullRequest.isStreamingSupported;
+
           newPdfManager = new NetworkPdfManager(
             docId,
             pdfStream,
             {
               msgHandler: handler,
-              password: source.password,
+              password,
               length: fullRequest.contentLength,
               disableAutoFetch,
-              rangeChunkSize: source.rangeChunkSize,
+              rangeChunkSize,
             },
             evaluatorOptions,
             enableXfa,
@@ -279,7 +283,7 @@ class WorkerMessageHandler {
       let loaded = 0;
       const flushChunks = function () {
         const pdfFile = arraysToBytes(cachedChunks);
-        if (source.length && pdfFile.length !== source.length) {
+        if (length && pdfFile.length !== length) {
           warn("reported HTTP length is different from actual");
         }
         // the data is array, instantiating directly from it
@@ -287,7 +291,7 @@ class WorkerMessageHandler {
           newPdfManager = new LocalPdfManager(
             docId,
             pdfFile,
-            source.password,
+            password,
             handler,
             evaluatorOptions,
             enableXfa,
@@ -405,18 +409,7 @@ class WorkerMessageHandler {
 
       ensureNotTerminated();
 
-      const evaluatorOptions = {
-        maxImageSize: data.maxImageSize,
-        disableFontFace: data.disableFontFace,
-        ignoreErrors: data.ignoreErrors,
-        isEvalSupported: data.isEvalSupported,
-        fontExtraProperties: data.fontExtraProperties,
-        useSystemFonts: data.useSystemFonts,
-        cMapUrl: data.cMapUrl,
-        standardFontDataUrl: data.standardFontDataUrl,
-      };
-
-      getPdfManager(data, evaluatorOptions, data.enableXfa)
+      getPdfManager(data)
         .then(function (newPdfManager) {
           if (terminated) {
             // We were in a process of setting up the manager, but it got
@@ -734,12 +727,6 @@ class WorkerMessageHandler {
               if (task.terminated) {
                 return; // ignoring errors from the terminated thread
               }
-              // For compatibility with older behavior, generating unknown
-              // unsupported feature notification on errors.
-              handler.send("UnsupportedFeature", {
-                featureId: UNSUPPORTED_FEATURES.errorOperatorList,
-              });
-
               sink.error(reason);
 
               // TODO: Should `reason` be re-thrown here (currently that casues

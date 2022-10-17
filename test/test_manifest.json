@@ -646,6 +646,21 @@
        "rounds": 1,
        "type": "eq"
     },
+    {  "id": "issue15557",
+       "file": "pdfs/issue15557.pdf",
+       "md5": "5f024a42acf27f3eadc4c7418e8f4e42",
+       "rounds": 1,
+       "type": "eq",
+       "annotations": true
+    },
+    {  "id": "issue15559",
+       "file": "pdfs/issue15559.pdf",
+       "md5": "b937f2e32925aef8c1740f357f2a6282",
+       "link": true,
+       "rounds": 1,
+       "lastPage": 1,
+       "type": "eq"
+    },
     {  "id": "hmm-pdf",
        "file": "pdfs/hmm.pdf",
        "md5": "e08467e60101ee5f4a59716e86db6dc9",
@@ -6909,6 +6924,12 @@
       "file": "pdfs/bug1791583.pdf",
       "md5": "1ff6badc865c9a5e9a0dc0b7131ffe28",
       "link": true,
+      "rounds": 1,
+      "type": "eq"
+   },
+   {  "id": "bug1795263",
+      "file": "pdfs/bug1795263.pdf",
+      "md5": "af708acbb22c6c9d268240dcf4a39809",
       "rounds": 1,
       "type": "eq"
    }

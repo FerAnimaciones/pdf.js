@@ -500,14 +500,18 @@ class AForm {
 
     const event = globalThis.event;
     const values = [];
+
+    cFields = this.AFMakeArrayFromList(cFields);
     for (const cField of cFields) {
       const field = this._document.getField(cField);
       if (!field) {
         continue;
       }
-      const number = this.AFMakeNumber(field.value);
-      if (number !== null) {
-        values.push(number);
+      for (const child of field.getArray()) {
+        const number = this.AFMakeNumber(child.value);
+        if (number !== null) {
+          values.push(number);
+        }
       }
     }
 
@@ -682,6 +686,14 @@ class AForm {
 
   eMailValidate(str) {
     return this._emailRegex.test(str);
+  }
+
+  AFExactMatch(rePatterns, str) {
+    if (rePatterns instanceof RegExp) {
+      return str.match(rePatterns)?.[0] === str || 0;
+    }
+
+    return rePatterns.findIndex(re => str.match(re)?.[0] === str) + 1;
   }
 }
 

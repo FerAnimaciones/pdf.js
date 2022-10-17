@@ -84,6 +84,7 @@ const DefaultPartialEvaluatorOptions = Object.freeze({
   disableFontFace: false,
   ignoreErrors: false,
   isEvalSupported: true,
+  isOffscreenCanvasSupported: true,
   fontExtraProperties: false,
   useSystemFonts: true,
   cMapUrl: null,
@@ -112,8 +113,8 @@ const deferred = Promise.resolve();
 function normalizeBlendMode(value, parsingArray = false) {
   if (Array.isArray(value)) {
     // Use the first *supported* BM value in the Array (fixes issue11279.pdf).
-    for (let i = 0, ii = value.length; i < ii; i++) {
-      const maybeBM = normalizeBlendMode(value[i], /* parsingArray = */ true);
+    for (const val of value) {
+      const maybeBM = normalizeBlendMode(val, /* parsingArray = */ true);
       if (maybeBM) {
         return maybeBM;
       }
@@ -652,6 +653,7 @@ class PartialEvaluator {
         imageIsFromDecodeStream: image instanceof DecodeStream,
         inverseDecode: !!decode && decode[0] > 0,
         interpolate,
+        isOffscreenCanvasSupported: this.options.isOffscreenCanvasSupported,
       });
 
       if (imgData.isSingleOpaquePixel) {
@@ -1056,10 +1058,8 @@ class PartialEvaluator {
     let isSimpleGState = true;
     // This array holds the converted/processed state data.
     const gStateObj = [];
-    const gStateKeys = gState.getKeys();
     let promise = Promise.resolve();
-    for (let i = 0, ii = gStateKeys.length; i < ii; i++) {
-      const key = gStateKeys[i];
+    for (const key of gState.getKeys()) {
       const value = gState.get(key);
       switch (key) {
         case "Type":
@@ -3419,8 +3419,8 @@ class PartialEvaluator {
         if (encoding.has("Differences")) {
           const diffEncoding = encoding.get("Differences");
           let index = 0;
-          for (let j = 0, jj = diffEncoding.length; j < jj; j++) {
-            const data = xref.fetchIfRef(diffEncoding[j]);
+          for (const entry of diffEncoding) {
+            const data = xref.fetchIfRef(entry);
             if (typeof data === "number") {
               index = data;
             } else if (data instanceof Name) {
@@ -3526,77 +3526,77 @@ class PartialEvaluator {
     for (const charcode in encoding) {
       // a) Map the character code to a character name.
       let glyphName = encoding[charcode];
-      // b) Look up the character name in the Adobe Glyph List (see the
-      //    Bibliography) to obtain the corresponding Unicode value.
       if (glyphName === "") {
         continue;
-      } else if (glyphsUnicodeMap[glyphName] === undefined) {
-        // (undocumented) c) Few heuristics to recognize unknown glyphs
-        // NOTE: Adobe Reader does not do this step, but OSX Preview does
-        let code = 0;
-        switch (glyphName[0]) {
-          case "G": // Gxx glyph
-            if (glyphName.length === 3) {
-              code = parseInt(glyphName.substring(1), 16);
-            }
-            break;
-          case "g": // g00xx glyph
-            if (glyphName.length === 5) {
-              code = parseInt(glyphName.substring(1), 16);
-            }
-            break;
-          case "C": // Cdd{d} glyph
-          case "c": // cdd{d} glyph
-            if (glyphName.length >= 3 && glyphName.length <= 4) {
-              const codeStr = glyphName.substring(1);
-
-              if (forceGlyphs) {
-                code = parseInt(codeStr, 16);
-                break;
-              }
-              // Normally the Cdd{d}/cdd{d} glyphName format will contain
-              // regular, i.e. base 10, charCodes (see issue4550.pdf)...
-              code = +codeStr;
-
-              // ... however some PDF generators violate that assumption by
-              // containing glyph, i.e. base 16, codes instead.
-              // In that case we need to re-parse the *entire* encoding to
-              // prevent broken text-selection (fixes issue9655_reduced.pdf).
-              if (
-                Number.isNaN(code) &&
-                Number.isInteger(parseInt(codeStr, 16))
-              ) {
-                return this._simpleFontToUnicode(
-                  properties,
-                  /* forceGlyphs */ true
-                );
-              }
-            }
-            break;
-          default: // 'uniXXXX'/'uXXXX{XX}' glyphs
-            const unicode = getUnicodeForGlyph(glyphName, glyphsUnicodeMap);
-            if (unicode !== -1) {
-              code = unicode;
-            }
-        }
-        if (code > 0 && code <= 0x10ffff && Number.isInteger(code)) {
-          // If `baseEncodingName` is one the predefined encodings, and `code`
-          // equals `charcode`, using the glyph defined in the baseEncoding
-          // seems to yield a better `toUnicode` mapping (fixes issue 5070).
-          if (baseEncodingName && code === +charcode) {
-            const baseEncoding = getEncoding(baseEncodingName);
-            if (baseEncoding && (glyphName = baseEncoding[charcode])) {
-              toUnicode[charcode] = String.fromCharCode(
-                glyphsUnicodeMap[glyphName]
-              );
-              continue;
-            }
-          }
-          toUnicode[charcode] = String.fromCodePoint(code);
-        }
+      }
+      // b) Look up the character name in the Adobe Glyph List (see the
+      //    Bibliography) to obtain the corresponding Unicode value.
+      let unicode = glyphsUnicodeMap[glyphName];
+      if (unicode !== undefined) {
+        toUnicode[charcode] = String.fromCharCode(unicode);
         continue;
       }
-      toUnicode[charcode] = String.fromCharCode(glyphsUnicodeMap[glyphName]);
+      // (undocumented) c) Few heuristics to recognize unknown glyphs
+      // NOTE: Adobe Reader does not do this step, but OSX Preview does
+      let code = 0;
+      switch (glyphName[0]) {
+        case "G": // Gxx glyph
+          if (glyphName.length === 3) {
+            code = parseInt(glyphName.substring(1), 16);
+          }
+          break;
+        case "g": // g00xx glyph
+          if (glyphName.length === 5) {
+            code = parseInt(glyphName.substring(1), 16);
+          }
+          break;
+        case "C": // Cdd{d} glyph
+        case "c": // cdd{d} glyph
+          if (glyphName.length >= 3 && glyphName.length <= 4) {
+            const codeStr = glyphName.substring(1);
+
+            if (forceGlyphs) {
+              code = parseInt(codeStr, 16);
+              break;
+            }
+            // Normally the Cdd{d}/cdd{d} glyphName format will contain
+            // regular, i.e. base 10, charCodes (see issue4550.pdf)...
+            code = +codeStr;
+
+            // ... however some PDF generators violate that assumption by
+            // containing glyph, i.e. base 16, codes instead.
+            // In that case we need to re-parse the *entire* encoding to
+            // prevent broken text-selection (fixes issue9655_reduced.pdf).
+            if (Number.isNaN(code) && Number.isInteger(parseInt(codeStr, 16))) {
+              return this._simpleFontToUnicode(
+                properties,
+                /* forceGlyphs */ true
+              );
+            }
+          }
+          break;
+        case "u": // 'uniXXXX'/'uXXXX{XX}' glyphs
+          unicode = getUnicodeForGlyph(glyphName, glyphsUnicodeMap);
+          if (unicode !== -1) {
+            code = unicode;
+          }
+          break;
+      }
+      if (code > 0 && code <= 0x10ffff && Number.isInteger(code)) {
+        // If `baseEncodingName` is one the predefined encodings, and `code`
+        // equals `charcode`, using the glyph defined in the baseEncoding
+        // seems to yield a better `toUnicode` mapping (fixes issue 5070).
+        if (baseEncodingName && code === +charcode) {
+          const baseEncoding = getEncoding(baseEncodingName);
+          if (baseEncoding && (glyphName = baseEncoding[charcode])) {
+            toUnicode[charcode] = String.fromCharCode(
+              glyphsUnicodeMap[glyphName]
+            );
+            continue;
+          }
+        }
+        toUnicode[charcode] = String.fromCodePoint(code);
+      }
     }
     return toUnicode;
   }
@@ -4150,8 +4150,8 @@ class PartialEvaluator {
             if (widths) {
               const glyphWidths = [];
               let j = firstChar;
-              for (let i = 0, ii = widths.length; i < ii; i++) {
-                glyphWidths[j++] = this.xref.fetchIfRef(widths[i]);
+              for (const width of widths) {
+                glyphWidths[j++] = this.xref.fetchIfRef(width);
               }
               newProperties.widths = glyphWidths;
             } else {

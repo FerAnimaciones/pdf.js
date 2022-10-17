@@ -34,6 +34,8 @@ class FreeTextEditor extends AnnotationEditor {
 
   #boundEditorDivFocus = this.editorDivFocus.bind(this);
 
+  #boundEditorDivInput = this.editorDivInput.bind(this);
+
   #boundEditorDivKeydown = this.editorDivKeydown.bind(this);
 
   #color;
@@ -230,7 +232,7 @@ class FreeTextEditor extends AnnotationEditor {
     this.editorDiv.addEventListener("keydown", this.#boundEditorDivKeydown);
     this.editorDiv.addEventListener("focus", this.#boundEditorDivFocus);
     this.editorDiv.addEventListener("blur", this.#boundEditorDivBlur);
-    this.parent.div.classList.remove("freeTextEditing");
+    this.editorDiv.addEventListener("input", this.#boundEditorDivInput);
   }
 
   /** @inheritdoc */
@@ -248,6 +250,7 @@ class FreeTextEditor extends AnnotationEditor {
     this.editorDiv.removeEventListener("keydown", this.#boundEditorDivKeydown);
     this.editorDiv.removeEventListener("focus", this.#boundEditorDivFocus);
     this.editorDiv.removeEventListener("blur", this.#boundEditorDivBlur);
+    this.editorDiv.removeEventListener("input", this.#boundEditorDivInput);
 
     // On Chrome, the focus is given to <body> when contentEditable is set to
     // false, hence we focus the div.
@@ -299,8 +302,7 @@ class FreeTextEditor extends AnnotationEditor {
       return this.editorDiv.innerText;
     }
     const buffer = [];
-    for (let i = 0, ii = divs.length; i < ii; i++) {
-      const div = divs[i];
+    for (const div of divs) {
       const first = div.firstChild;
       if (first?.nodeName === "#text") {
         buffer.push(first.data);
@@ -373,6 +375,10 @@ class FreeTextEditor extends AnnotationEditor {
 
   editorDivBlur(event) {
     this.isEditing = false;
+  }
+
+  editorDivInput(event) {
+    this.parent.div.classList.toggle("freeTextEditing", this.isEmpty());
   }
 
   /** @inheritdoc */
