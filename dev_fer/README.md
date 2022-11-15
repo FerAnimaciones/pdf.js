@@ -18,6 +18,9 @@ if(urlParams.get("print")=="false"){
 if(urlParams.get("download")=="false"){
   document.getElementById("download").hidden = true;
 }
+if(urlParams.get("editor")=="false"){
+  document.getElementById("editorModeButtons").hidden = true;
+}
 document.getElementById("openFile").hidden = true;
 window.addEventListener('load', function () {
   PDFViewerApplication.preferences.set('pdfBugEnabled', true);
