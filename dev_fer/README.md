@@ -1,3 +1,12 @@
+# NPM INSTLL
+
+Verificar la cache si no permite installar paquetes.
+```
+npm cache verify
+```
+
+Eliminar el archivo "package-lock.json" si continua sin poder instalar.
+
 # Compilation
 
 ```
