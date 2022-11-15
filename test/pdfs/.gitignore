@@ -94,6 +94,7 @@
 !issue9084.pdf
 !issue12963.pdf
 !issue9105_reduced.pdf
+!issue9105_other.pdf
 !issue9252.pdf
 !issue9262_reduced.pdf
 !issue9291.pdf
@@ -301,6 +302,7 @@
 !issue5751.pdf
 !bug893730.pdf
 !bug864847.pdf
+!issue15629.pdf
 !issue1002.pdf
 !issue925.pdf
 !issue2840.pdf
@@ -349,6 +351,8 @@
 !issue9534_reduced.pdf
 !attachment.pdf
 !basicapi.pdf
+!issue15590.pdf
+!issue15594_reduced.pdf
 !issue2884_reduced.pdf
 !mixedfonts.pdf
 !shading_extend.pdf
@@ -530,6 +534,7 @@
 !issue14415.pdf
 !issue14307.pdf
 !issue14497.pdf
+!bug1799927.pdf
 !issue14502.pdf
 !issue13211.pdf
 !issue14627.pdf
@@ -545,3 +550,8 @@
 !bug1782564.pdf
 !issue15340.pdf
 !bug1795263.pdf
+!issue15597.pdf
+!bug1796741.pdf
+!textfields.pdf
+!freetext_no_appearance.pdf
+!issue15690.pdf

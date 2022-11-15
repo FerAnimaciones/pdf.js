@@ -35,9 +35,11 @@ import {
 } from "./fonts_utils.js";
 import {
   getCharUnicodeCategory,
+  getNormalizedUnicodes,
   getUnicodeForGlyph,
   getUnicodeRangeFor,
   mapSpecialUnicodeValues,
+  reverseIfRtl,
 } from "./unicode.js";
 import { getDingbatsGlyphsUnicode, getGlyphsUnicode } from "./glyphlist.js";
 import {
@@ -91,6 +93,7 @@ const EXPORT_DATA_PROPERTIES = [
   "fallbackName",
   "fontMatrix",
   "fontType",
+  "isInvalidPDFjsFont",
   "isType3Font",
   "italic",
   "loadedName",
@@ -212,35 +215,38 @@ class Glyph {
     this.operatorListId = operatorListId;
     this.isSpace = isSpace;
     this.isInFont = isInFont;
-
-    const category = getCharUnicodeCategory(unicode);
-    this.isWhitespace = category.isWhitespace;
-    this.isZeroWidthDiacritic = category.isZeroWidthDiacritic;
-    this.isInvisibleFormatMark = category.isInvisibleFormatMark;
   }
 
-  matchesForCache(
-    originalCharCode,
-    fontChar,
-    unicode,
-    accent,
-    width,
-    vmetric,
-    operatorListId,
-    isSpace,
-    isInFont
-  ) {
-    return (
-      this.originalCharCode === originalCharCode &&
-      this.fontChar === fontChar &&
-      this.unicode === unicode &&
-      this.accent === accent &&
-      this.width === width &&
-      this.vmetric === vmetric &&
-      this.operatorListId === operatorListId &&
-      this.isSpace === isSpace &&
-      this.isInFont === isInFont
+  /**
+   * This property, which is only used by `PartialEvaluator.getTextContent`,
+   * is purposely made non-serializable.
+   * @type {Object}
+   */
+  get category() {
+    return shadow(
+      this,
+      "category",
+      getCharUnicodeCategory(this.unicode),
+      /* nonSerializable = */ true
     );
+  }
+
+  /**
+   * This property, which is only used by `PartialEvaluator.getTextContent`,
+   * is purposely made non-serializable.
+   * @type {string}
+   */
+  get normalizedUnicode() {
+    return shadow(
+      this,
+      "normalizedUnicode",
+      reverseIfRtl(Glyph._NormalizedUnicodes[this.unicode] || this.unicode),
+      /* nonSerializable = */ true
+    );
+  }
+
+  static get _NormalizedUnicodes() {
+    return shadow(this, "_NormalizedUnicodes", getNormalizedUnicodes());
   }
 }
 
@@ -947,13 +953,17 @@ class Font {
     this.type = type;
     this.subtype = subtype;
 
-    let fallbackName = "sans-serif";
-    if (this.isMonospace) {
-      fallbackName = "monospace";
+    const matches = name.match(/^InvalidPDFjsFont_(.*)_\d+$/);
+    this.isInvalidPDFjsFont = !!matches;
+    if (this.isInvalidPDFjsFont) {
+      this.fallbackName = matches[1];
+    } else if (this.isMonospace) {
+      this.fallbackName = "monospace";
     } else if (this.isSerifFont) {
-      fallbackName = "serif";
+      this.fallbackName = "serif";
+    } else {
+      this.fallbackName = "sans-serif";
     }
-    this.fallbackName = fallbackName;
 
     this.differences = properties.differences;
     this.widths = properties.widths;
@@ -3249,6 +3259,12 @@ class Font {
    * @private
    */
   _charToGlyph(charcode, isSpace = false) {
+    let glyph = this._glyphCache[charcode];
+    // All `Glyph`-properties, except `isSpace` in multi-byte strings,
+    // depend indirectly on the `charcode`.
+    if (glyph && glyph.isSpace === isSpace) {
+      return glyph;
+    }
     let fontCharCode, width, operatorListId;
 
     let widthCode = charcode;
@@ -3313,35 +3329,18 @@ class Font {
       }
     }
 
-    let glyph = this._glyphCache[charcode];
-    if (
-      !glyph ||
-      !glyph.matchesForCache(
-        charcode,
-        fontChar,
-        unicode,
-        accent,
-        width,
-        vmetric,
-        operatorListId,
-        isSpace,
-        isInFont
-      )
-    ) {
-      glyph = new Glyph(
-        charcode,
-        fontChar,
-        unicode,
-        accent,
-        width,
-        vmetric,
-        operatorListId,
-        isSpace,
-        isInFont
-      );
-      this._glyphCache[charcode] = glyph;
-    }
-    return glyph;
+    glyph = new Glyph(
+      charcode,
+      fontChar,
+      unicode,
+      accent,
+      width,
+      vmetric,
+      operatorListId,
+      isSpace,
+      isInFont
+    );
+    return (this._glyphCache[charcode] = glyph);
   }
 
   charsToGlyphs(chars) {

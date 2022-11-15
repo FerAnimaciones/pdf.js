@@ -42,6 +42,8 @@ class FreeTextEditor extends AnnotationEditor {
 
   #content = "";
 
+  #editorDivId = `${this.id}-editor`;
+
   #hasAlreadyBeenCommitted = false;
 
   #fontSize;
@@ -225,10 +227,10 @@ class FreeTextEditor extends AnnotationEditor {
     this.parent.setEditingState(false);
     this.parent.updateToolbar(AnnotationEditorType.FREETEXT);
     super.enableEditMode();
-    this.enableEditing();
     this.overlayDiv.classList.remove("enabled");
     this.editorDiv.contentEditable = true;
     this.div.draggable = false;
+    this.div.removeAttribute("aria-activedescendant");
     this.editorDiv.addEventListener("keydown", this.#boundEditorDivKeydown);
     this.editorDiv.addEventListener("focus", this.#boundEditorDivFocus);
     this.editorDiv.addEventListener("blur", this.#boundEditorDivBlur);
@@ -243,9 +245,9 @@ class FreeTextEditor extends AnnotationEditor {
 
     this.parent.setEditingState(true);
     super.disableEditMode();
-    this.disableEditing();
     this.overlayDiv.classList.add("enabled");
     this.editorDiv.contentEditable = false;
+    this.div.setAttribute("aria-activedescendant", this.#editorDivId);
     this.div.draggable = true;
     this.editorDiv.removeEventListener("keydown", this.#boundEditorDivKeydown);
     this.editorDiv.removeEventListener("focus", this.#boundEditorDivFocus);
@@ -303,12 +305,7 @@ class FreeTextEditor extends AnnotationEditor {
     }
     const buffer = [];
     for (const div of divs) {
-      const first = div.firstChild;
-      if (first?.nodeName === "#text") {
-        buffer.push(first.data);
-      } else {
-        buffer.push("");
-      }
+      buffer.push(div.innerText.replace(/\r\n?|\n/, ""));
     }
     return buffer.join("\n");
   }
@@ -409,7 +406,7 @@ class FreeTextEditor extends AnnotationEditor {
     this.editorDiv = document.createElement("div");
     this.editorDiv.className = "internal";
 
-    this.editorDiv.setAttribute("id", `${this.id}-editor`);
+    this.editorDiv.setAttribute("id", this.#editorDivId);
     this.enableEditing();
 
     FreeTextEditor._l10nPromise

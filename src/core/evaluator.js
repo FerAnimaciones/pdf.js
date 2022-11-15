@@ -51,11 +51,6 @@ import {
   getStdFontMap,
   getSymbolsFonts,
 } from "./standard_fonts.js";
-import {
-  getNormalizedUnicodes,
-  getUnicodeForGlyph,
-  reverseIfRtl,
-} from "./unicode.js";
 import { getTilingPatternIR, Pattern } from "./pattern.js";
 import { getXfaFontDict, getXfaFontName } from "./xfa_fonts.js";
 import { IdentityToUnicodeMap, ToUnicodeMap } from "./to_unicode_map.js";
@@ -75,6 +70,7 @@ import { DecodeStream } from "./decode_stream.js";
 import { getGlyphsUnicode } from "./glyphlist.js";
 import { getLookupTableFactory } from "./core_utils.js";
 import { getMetrics } from "./metrics.js";
+import { getUnicodeForGlyph } from "./unicode.js";
 import { MurmurHash3_64 } from "../shared/murmurhash3.js";
 import { OperatorList } from "./operator_list.js";
 import { PDFImage } from "./image.js";
@@ -2283,13 +2279,16 @@ class PartialEvaluator {
     sink,
     seenStyles = new Set(),
     viewBox,
+    markedContentData = null,
   }) {
     // Ensure that `resources`/`stateManager` is correctly initialized,
     // even if the provided parameter is e.g. `null`.
     resources = resources || Dict.empty;
     stateManager = stateManager || new StateManager(new TextState());
 
-    const NormalizedUnicodes = getNormalizedUnicodes();
+    if (includeMarkedContent) {
+      markedContentData = markedContentData || { level: 0 };
+    }
 
     const textContent = {
       items: [],
@@ -2426,8 +2425,7 @@ class PartialEvaluator {
       if (textContentItem.initialized) {
         return textContentItem;
       }
-      const font = textState.font,
-        loadedName = font.loadedName;
+      const { font, loadedName } = textState;
       if (!seenStyles.has(loadedName)) {
         seenStyles.add(loadedName);
 
@@ -2540,6 +2538,7 @@ class PartialEvaluator {
             });
         })
         .then(function (translated) {
+          textState.loadedName = translated.loadedName;
           textState.font = translated.font;
           textState.fontMatrix =
             translated.font.fontMatrix || FONT_IDENTITY_MATRIX;
@@ -2776,7 +2775,9 @@ class PartialEvaluator {
 
       for (let i = 0, ii = glyphs.length; i < ii; i++) {
         const glyph = glyphs[i];
-        if (glyph.isInvisibleFormatMark) {
+        const { category } = glyph;
+
+        if (category.isInvisibleFormatMark) {
           continue;
         }
         let charSpacing =
@@ -2788,7 +2789,7 @@ class PartialEvaluator {
         }
         let scaledDim = glyphWidth * scale;
 
-        if (glyph.isWhitespace) {
+        if (category.isWhitespace) {
           // Don't push a " " in the textContentItem
           // (except when it's between two non-spaces chars),
           // it will be done (if required) in next call to
@@ -2816,7 +2817,7 @@ class PartialEvaluator {
         // Must be called after compareWithLastPosition because
         // the textContentItem could have been flushed.
         const textChunk = ensureTextContentItem();
-        if (glyph.isZeroWidthDiacritic) {
+        if (category.isZeroWidthDiacritic) {
           scaledDim = 0;
         }
 
@@ -2835,9 +2836,7 @@ class PartialEvaluator {
           textChunk.prevTransform = getCurrentTextTransform();
         }
 
-        let glyphUnicode = glyph.unicode;
-        glyphUnicode = NormalizedUnicodes[glyphUnicode] || glyphUnicode;
-        glyphUnicode = reverseIfRtl(glyphUnicode);
+        const glyphUnicode = glyph.normalizedUnicode;
         if (saveLastChar(glyphUnicode)) {
           // The two last chars are a non-whitespace followed by a whitespace
           // and then this non-whitespace, so we insert a whitespace here.
@@ -2873,7 +2872,7 @@ class PartialEvaluator {
           width: 0,
           height: 0,
           transform: getCurrentTextTransform(),
-          fontName: textState.font.loadedName,
+          fontName: textState.loadedName,
           hasEOL: true,
         });
       }
@@ -3225,6 +3224,7 @@ class PartialEvaluator {
                     sink: sinkWrapper,
                     seenStyles,
                     viewBox,
+                    markedContentData,
                   })
                   .then(function () {
                     if (!sinkWrapper.enqueueInvoked) {
@@ -3305,6 +3305,8 @@ class PartialEvaluator {
           case OPS.beginMarkedContent:
             flushTextContentItem();
             if (includeMarkedContent) {
+              markedContentData.level++;
+
               textContent.items.push({
                 type: "beginMarkedContent",
                 tag: args[0] instanceof Name ? args[0].name : null,
@@ -3314,6 +3316,8 @@ class PartialEvaluator {
           case OPS.beginMarkedContentProps:
             flushTextContentItem();
             if (includeMarkedContent) {
+              markedContentData.level++;
+
               let mcid = null;
               if (args[1] instanceof Dict) {
                 mcid = args[1].get("MCID");
@@ -3330,6 +3334,13 @@ class PartialEvaluator {
           case OPS.endMarkedContent:
             flushTextContentItem();
             if (includeMarkedContent) {
+              if (markedContentData.level === 0) {
+                // Handle unbalanced beginMarkedContent/endMarkedContent
+                // operators (fixes issue15629.pdf).
+                break;
+              }
+              markedContentData.level--;
+
               textContent.items.push({
                 type: "endMarkedContent",
               });
@@ -4591,6 +4602,7 @@ class TextState {
     this.ctm = new Float32Array(IDENTITY_MATRIX);
     this.fontName = null;
     this.fontSize = 0;
+    this.loadedName = null;
     this.font = null;
     this.fontMatrix = FONT_IDENTITY_MATRIX;
     this.textMatrix = IDENTITY_MATRIX.slice();

@@ -2275,6 +2275,21 @@ class CanvasGraphics {
 
     ctx.lineWidth = lineWidth;
 
+    if (font.isInvalidPDFjsFont) {
+      const chars = [];
+      let width = 0;
+      for (const glyph of glyphs) {
+        chars.push(glyph.unicode);
+        width += glyph.width;
+      }
+      ctx.fillText(chars.join(""), 0, 0);
+      current.x += width * widthAdvanceScale * textHScale;
+      ctx.restore();
+      this.compose();
+
+      return undefined;
+    }
+
     let x = 0,
       i;
     for (i = 0; i < glyphsLength; ++i) {
@@ -2887,7 +2902,14 @@ class CanvasGraphics {
     ctx.transform(scaleX, skewX, skewY, scaleY, 0, 0);
     const mask = this._createMaskCanvas(img);
 
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.setTransform(
+      1,
+      0,
+      0,
+      1,
+      mask.offsetX - currentTransform[4],
+      mask.offsetY - currentTransform[5]
+    );
     for (let i = 0, ii = positions.length; i < ii; i += 2) {
       const trans = Util.transform(currentTransform, [
         scaleX,

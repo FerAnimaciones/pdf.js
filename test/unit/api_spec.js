@@ -602,27 +602,42 @@ describe("api", function () {
       const loadingTask2 = getDocument(
         buildGetDocumentParams("poppler-85140-0.pdf")
       );
+      const loadingTask3 = getDocument(
+        buildGetDocumentParams("poppler-85140-0.pdf", { stopAtErrors: true })
+      );
 
       expect(loadingTask1 instanceof PDFDocumentLoadingTask).toEqual(true);
       expect(loadingTask2 instanceof PDFDocumentLoadingTask).toEqual(true);
+      expect(loadingTask3 instanceof PDFDocumentLoadingTask).toEqual(true);
 
       const pdfDocument1 = await loadingTask1.promise;
       const pdfDocument2 = await loadingTask2.promise;
+      const pdfDocument3 = await loadingTask3.promise;
 
       expect(pdfDocument1.numPages).toEqual(1);
       expect(pdfDocument2.numPages).toEqual(1);
+      expect(pdfDocument3.numPages).toEqual(1);
 
-      const page = await pdfDocument1.getPage(1);
-      expect(page instanceof PDFPageProxy).toEqual(true);
+      const pageA = await pdfDocument1.getPage(1);
+      expect(pageA instanceof PDFPageProxy).toEqual(true);
 
-      const opList = await page.getOperatorList();
-      expect(opList.fnArray.length).toBeGreaterThan(5);
-      expect(opList.argsArray.length).toBeGreaterThan(5);
-      expect(opList.lastChunk).toEqual(true);
-      expect(opList.separateAnnots).toEqual(null);
+      const opListA = await pageA.getOperatorList();
+      expect(opListA.fnArray.length).toBeGreaterThan(5);
+      expect(opListA.argsArray.length).toBeGreaterThan(5);
+      expect(opListA.lastChunk).toEqual(true);
+      expect(opListA.separateAnnots).toEqual(null);
+
+      const pageB = await pdfDocument2.getPage(1);
+      expect(pageB instanceof PDFPageProxy).toEqual(true);
+
+      const opListB = await pageB.getOperatorList();
+      expect(opListB.fnArray.length).toBe(0);
+      expect(opListB.argsArray.length).toBe(0);
+      expect(opListB.lastChunk).toEqual(true);
+      expect(opListB.separateAnnots).toEqual(null);
 
       try {
-        await pdfDocument2.getPage(1);
+        await pdfDocument3.getPage(1);
 
         // Shouldn't get here.
         expect(false).toEqual(true);
@@ -631,7 +646,11 @@ describe("api", function () {
         expect(reason.message).toEqual("Bad (uncompressed) XRef entry: 3R");
       }
 
-      await Promise.all([loadingTask1.destroy(), loadingTask2.destroy()]);
+      await Promise.all([
+        loadingTask1.destroy(),
+        loadingTask2.destroy(),
+        loadingTask3.destroy(),
+      ]);
     });
 
     it("creates pdf doc from PDF files, with circular references", async function () {
@@ -735,6 +754,24 @@ describe("api", function () {
         null,
       ]);
       expect(opList.lastChunk).toEqual(true);
+
+      await loadingTask.destroy();
+    });
+
+    it("creates pdf doc from PDF file, with incomplete trailer", async function () {
+      const loadingTask = getDocument(buildGetDocumentParams("issue15590.pdf"));
+      expect(loadingTask instanceof PDFDocumentLoadingTask).toEqual(true);
+
+      const pdfDocument = await loadingTask.promise;
+      expect(pdfDocument.numPages).toEqual(1);
+
+      const jsActions = await pdfDocument.getJSActions();
+      expect(jsActions).toEqual({
+        OpenAction: ["func=function(){app.alert(1)};func();"],
+      });
+
+      const page = await pdfDocument.getPage(1);
+      expect(page instanceof PDFPageProxy).toEqual(true);
 
       await loadingTask.destroy();
     });
@@ -2207,7 +2244,7 @@ page 1 / 3`);
       const pdfPage = await pdfDoc.getPage(1);
       const { items, styles } = await pdfPage.getTextContent();
       expect(items.length).toEqual(1);
-      // Font name will a random object id.
+      // Font name will be a random object id.
       const fontName = items[0].fontName;
       expect(Object.keys(styles)).toEqual([fontName]);
 
@@ -2228,6 +2265,11 @@ page 1 / 3`);
         descent: isNodeJS ? NaN : -0.217,
         vertical: false,
       });
+
+      // Wait for font data to be loaded so we can check that the font names
+      // match.
+      await pdfPage.getOperatorList();
+      expect(pdfPage.commonObjs.has(fontName)).toEqual(true);
 
       await loadingTask.destroy();
     });

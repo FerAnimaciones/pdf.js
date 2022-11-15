@@ -30,6 +30,7 @@ const FONT_IDENTITY_MATRIX = [0.001, 0, 0, 0.001, 0, 0];
 // the font size. Acrobat seems to use this value.
 const LINE_FACTOR = 1.35;
 const LINE_DESCENT_FACTOR = 0.35;
+const BASELINE_FACTOR = LINE_DESCENT_FACTOR / LINE_FACTOR;
 
 /**
  * Refer to the `WorkerTransport.getRenderingIntent`-method in the API, to see
@@ -47,6 +48,7 @@ const RenderingIntentFlag = {
   ANY: 0x01,
   DISPLAY: 0x02,
   PRINT: 0x04,
+  SAVE: 0x08,
   ANNOTATIONS_FORMS: 0x10,
   ANNOTATIONS_STORAGE: 0x20,
   ANNOTATIONS_DISABLE: 0x40,
@@ -498,7 +500,7 @@ function createValidAbsoluteUrl(url, baseUrl = null, options = null) {
   return null;
 }
 
-function shadow(obj, prop, value) {
+function shadow(obj, prop, value, nonSerializable = false) {
   if (
     typeof PDFJSDev === "undefined" ||
     PDFJSDev.test("!PRODUCTION || TESTING")
@@ -510,7 +512,7 @@ function shadow(obj, prop, value) {
   }
   Object.defineProperty(obj, prop, {
     value,
-    enumerable: true,
+    enumerable: !nonSerializable,
     configurable: true,
     writable: false,
   });
@@ -1159,6 +1161,7 @@ export {
   arraysToBytes,
   assert,
   BaseException,
+  BASELINE_FACTOR,
   bytesToString,
   CMapCompressionType,
   createPromiseCapability,
