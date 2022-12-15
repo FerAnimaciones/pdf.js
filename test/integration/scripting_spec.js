@@ -1002,43 +1002,43 @@ describe("Interaction", () => {
     });
 
     it("must check input for US zip format", async () => {
-      await Promise.all(
-        pages.map(async ([browserName, page]) => {
-          await page.waitForFunction(
-            "window.PDFViewerApplication.scriptingReady === true"
-          );
+      // Run the tests sequentially to avoid any focus issues between the two
+      // browsers when an alert is displayed.
+      for (const [browserName, page] of pages) {
+        await page.waitForFunction(
+          "window.PDFViewerApplication.scriptingReady === true"
+        );
 
-          await clearInput(page, getSelector("29R"));
-          await clearInput(page, getSelector("30R"));
+        await clearInput(page, getSelector("29R"));
+        await clearInput(page, getSelector("30R"));
 
-          await page.focus(getSelector("29R"));
-          await page.type(getSelector("29R"), "12A", { delay: 100 });
-          await page.waitForFunction(
-            `${getQuerySelector("29R")}.value !== "12A"`
-          );
+        await page.focus(getSelector("29R"));
+        await page.type(getSelector("29R"), "12A", { delay: 100 });
+        await page.waitForFunction(
+          `${getQuerySelector("29R")}.value !== "12A"`
+        );
 
-          let text = await page.$eval(getSelector(`29R`), el => el.value);
-          expect(text).withContext(`In ${browserName}`).toEqual("12");
+        let text = await page.$eval(getSelector(`29R`), el => el.value);
+        expect(text).withContext(`In ${browserName}`).toEqual("12");
 
-          await page.focus(getSelector("29R"));
-          await page.type(getSelector("29R"), "34", { delay: 100 });
-          await page.click("[data-annotation-id='30R']");
+        await page.focus(getSelector("29R"));
+        await page.type(getSelector("29R"), "34", { delay: 100 });
+        await page.click("[data-annotation-id='30R']");
 
-          await page.waitForFunction(
-            `${getQuerySelector("29R")}.value !== "1234"`
-          );
+        await page.waitForFunction(
+          `${getQuerySelector("29R")}.value !== "1234"`
+        );
 
-          text = await page.$eval(getSelector(`29R`), el => el.value);
-          expect(text).withContext(`In ${browserName}`).toEqual("");
+        text = await page.$eval(getSelector(`29R`), el => el.value);
+        expect(text).withContext(`In ${browserName}`).toEqual("");
 
-          await page.focus(getSelector("29R"));
-          await page.type(getSelector("29R"), "12345", { delay: 100 });
-          await page.click("[data-annotation-id='30R']");
+        await page.focus(getSelector("29R"));
+        await page.type(getSelector("29R"), "12345", { delay: 100 });
+        await page.click("[data-annotation-id='30R']");
 
-          text = await page.$eval(getSelector(`29R`), el => el.value);
-          expect(text).withContext(`In ${browserName}`).toEqual("12345");
-        })
-      );
+        text = await page.$eval(getSelector(`29R`), el => el.value);
+        expect(text).withContext(`In ${browserName}`).toEqual("12345");
+      }
     });
   });
 
@@ -1059,45 +1059,43 @@ describe("Interaction", () => {
     });
 
     it("must check input for US phone number (long) format", async () => {
-      await Promise.all(
-        pages.map(async ([browserName, page]) => {
-          await page.waitForFunction(
-            "window.PDFViewerApplication.scriptingReady === true"
-          );
+      // Run the tests sequentially to avoid any focus issues between the two
+      // browsers when an alert is displayed.
+      for (const [browserName, page] of pages) {
+        await page.waitForFunction(
+          "window.PDFViewerApplication.scriptingReady === true"
+        );
 
-          await clearInput(page, getSelector("29R"));
-          await clearInput(page, getSelector("30R"));
+        await clearInput(page, getSelector("29R"));
+        await clearInput(page, getSelector("30R"));
 
-          await page.focus(getSelector("30R"));
-          await page.type(getSelector("30R"), "(123) 456A", { delay: 100 });
-          await page.waitForFunction(
-            `${getQuerySelector("30R")}.value !== "(123) 456A"`
-          );
+        await page.focus(getSelector("30R"));
+        await page.type(getSelector("30R"), "(123) 456A", { delay: 100 });
+        await page.waitForFunction(
+          `${getQuerySelector("30R")}.value !== "(123) 456A"`
+        );
 
-          let text = await page.$eval(getSelector(`30R`), el => el.value);
-          expect(text).withContext(`In ${browserName}`).toEqual("(123) 456");
+        let text = await page.$eval(getSelector(`30R`), el => el.value);
+        expect(text).withContext(`In ${browserName}`).toEqual("(123) 456");
 
-          await page.focus(getSelector("30R"));
-          await page.type(getSelector("30R"), "-789", { delay: 100 });
-          await page.click("[data-annotation-id='29R']");
+        await page.focus(getSelector("30R"));
+        await page.type(getSelector("30R"), "-789", { delay: 100 });
+        await page.click("[data-annotation-id='29R']");
 
-          await page.waitForFunction(
-            `${getQuerySelector("30R")}.value !== "(123) 456-789"`
-          );
+        await page.waitForFunction(
+          `${getQuerySelector("30R")}.value !== "(123) 456-789"`
+        );
 
-          text = await page.$eval(getSelector(`30R`), el => el.value);
-          expect(text).withContext(`In ${browserName}`).toEqual("");
+        text = await page.$eval(getSelector(`30R`), el => el.value);
+        expect(text).withContext(`In ${browserName}`).toEqual("");
 
-          await page.focus(getSelector("30R"));
-          await page.type(getSelector("30R"), "(123) 456-7890", { delay: 100 });
-          await page.click("[data-annotation-id='29R']");
+        await page.focus(getSelector("30R"));
+        await page.type(getSelector("30R"), "(123) 456-7890", { delay: 100 });
+        await page.click("[data-annotation-id='29R']");
 
-          text = await page.$eval(getSelector("30R"), el => el.value);
-          expect(text)
-            .withContext(`In ${browserName}`)
-            .toEqual("(123) 456-7890");
-        })
-      );
+        text = await page.$eval(getSelector("30R"), el => el.value);
+        expect(text).withContext(`In ${browserName}`).toEqual("(123) 456-7890");
+      }
     });
   });
 
@@ -1118,43 +1116,43 @@ describe("Interaction", () => {
     });
 
     it("must check input for US phone number (short) format", async () => {
-      await Promise.all(
-        pages.map(async ([browserName, page]) => {
-          await page.waitForFunction(
-            "window.PDFViewerApplication.scriptingReady === true"
-          );
+      // Run the tests sequentially to avoid any focus issues between the two
+      // browsers when an alert is displayed.
+      for (const [browserName, page] of pages) {
+        await page.waitForFunction(
+          "window.PDFViewerApplication.scriptingReady === true"
+        );
 
-          await clearInput(page, getSelector("29R"));
-          await clearInput(page, getSelector("30R"));
+        await clearInput(page, getSelector("29R"));
+        await clearInput(page, getSelector("30R"));
 
-          await page.focus(getSelector("30R"));
-          await page.type(getSelector("30R"), "123A", { delay: 100 });
-          await page.waitForFunction(
-            `${getQuerySelector("30R")}.value !== "123A"`
-          );
+        await page.focus(getSelector("30R"));
+        await page.type(getSelector("30R"), "123A", { delay: 100 });
+        await page.waitForFunction(
+          `${getQuerySelector("30R")}.value !== "123A"`
+        );
 
-          let text = await page.$eval(getSelector(`30R`), el => el.value);
-          expect(text).withContext(`In ${browserName}`).toEqual("123");
+        let text = await page.$eval(getSelector(`30R`), el => el.value);
+        expect(text).withContext(`In ${browserName}`).toEqual("123");
 
-          await page.focus(getSelector("30R"));
-          await page.type(getSelector("30R"), "-456", { delay: 100 });
-          await page.click("[data-annotation-id='29R']");
+        await page.focus(getSelector("30R"));
+        await page.type(getSelector("30R"), "-456", { delay: 100 });
+        await page.click("[data-annotation-id='29R']");
 
-          await page.waitForFunction(
-            `${getQuerySelector("30R")}.value !== "123-456"`
-          );
+        await page.waitForFunction(
+          `${getQuerySelector("30R")}.value !== "123-456"`
+        );
 
-          text = await page.$eval(getSelector("30R"), el => el.value);
-          expect(text).withContext(`In ${browserName}`).toEqual("");
+        text = await page.$eval(getSelector("30R"), el => el.value);
+        expect(text).withContext(`In ${browserName}`).toEqual("");
 
-          await page.focus(getSelector("30R"));
-          await page.type(getSelector("30R"), "123-4567", { delay: 100 });
-          await page.click("[data-annotation-id='29R']");
+        await page.focus(getSelector("30R"));
+        await page.type(getSelector("30R"), "123-4567", { delay: 100 });
+        await page.click("[data-annotation-id='29R']");
 
-          text = await page.$eval(getSelector("30R"), el => el.value);
-          expect(text).withContext(`In ${browserName}`).toEqual("123-4567");
-        })
-      );
+        text = await page.$eval(getSelector("30R"), el => el.value);
+        expect(text).withContext(`In ${browserName}`).toEqual("123-4567");
+      }
     });
   });
 
@@ -1247,6 +1245,11 @@ describe("Interaction", () => {
         pages.map(async ([browserName, page]) => {
           await page.waitForFunction(
             "window.PDFViewerApplication.scriptingReady === true"
+          );
+
+          await page.click(getSelector("28R"));
+          await page.$eval(getSelector("28R"), el =>
+            el.setSelectionRange(0, 0)
           );
 
           await page.type(getSelector("28R"), "Hello", { delay: 100 });
@@ -1558,6 +1561,194 @@ describe("Interaction", () => {
 
           value = await page.$eval(getSelector("7R"), el => el.value);
           expect(value).withContext(`In ${browserName}`).toEqual("xy");
+        })
+      );
+    });
+  });
+
+  describe("in bug1802888.pdf", () => {
+    let pages;
+
+    beforeAll(async () => {
+      pages = await loadAndWait("bug1802888.pdf", getSelector("30R"));
+    });
+
+    afterAll(async () => {
+      await closePages(pages);
+    });
+
+    it("must check field value is treated by default as a number", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          await page.waitForFunction(
+            "window.PDFViewerApplication.scriptingReady === true"
+          );
+
+          await page.type(getSelector("30R"), "123", {
+            delay: 10,
+          });
+          await page.click(getSelector("31R"));
+          await page.type(getSelector("31R"), "456", {
+            delay: 10,
+          });
+          await page.click(getSelector("26R"));
+          await page.click(getSelector("27R"));
+          await page.waitForFunction(`${getQuerySelector("26R")}.value !== ""`);
+
+          const value = await page.$eval(getSelector("26R"), el => el.value);
+          expect(value).withContext(`In ${browserName}`).toEqual("579");
+        })
+      );
+    });
+  });
+
+  describe("in issue15753.pdf", () => {
+    let pages;
+
+    beforeAll(async () => {
+      pages = await loadAndWait("issue15753.pdf", getSelector("27R"));
+    });
+
+    afterAll(async () => {
+      await closePages(pages);
+    });
+
+    it("must check field value is correctly updated when committed with ENTER key", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          await page.waitForFunction(
+            "window.PDFViewerApplication.scriptingReady === true"
+          );
+
+          await page.type(getSelector("27R"), "abc", {
+            delay: 10,
+          });
+          await page.keyboard.press("Enter");
+          await page.waitForFunction(`${getQuerySelector("28R")}.value !== ""`);
+          let value = await page.$eval(getSelector("28R"), el => el.value);
+          expect(value).withContext(`In ${browserName}`).toEqual("abc");
+
+          await page.type(getSelector("27R"), "def", {
+            delay: 10,
+          });
+
+          await page.keyboard.press("Enter");
+          await page.waitForFunction(
+            `${getQuerySelector("28R")}.value !== "abc"`
+          );
+          value = await page.$eval(getSelector("28R"), el => el.value);
+          expect(value).withContext(`In ${browserName}`).toEqual("abcdef");
+
+          await page.keyboard.down("Control");
+          await page.keyboard.press("A");
+          await page.keyboard.up("Control");
+          await page.keyboard.press("Backspace");
+
+          await page.keyboard.press("Enter");
+          await page.waitForFunction(
+            `${getQuerySelector("28R")}.value !== "abcdef"`
+          );
+          value = await page.$eval(getSelector("28R"), el => el.value);
+          expect(value).withContext(`In ${browserName}`).toEqual("");
+        })
+      );
+    });
+  });
+
+  describe("in issue15815.pdf", () => {
+    let pages;
+
+    beforeAll(async () => {
+      pages = await loadAndWait("issue15815.pdf", getSelector("24R"));
+    });
+
+    afterAll(async () => {
+      await closePages(pages);
+    });
+
+    it("must check field value is correctly updated when committed with ENTER key", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          await page.waitForFunction(
+            "window.PDFViewerApplication.scriptingReady === true"
+          );
+
+          let value = "A";
+          for (const [displayValue, exportValue] of [
+            ["B", "x2"],
+            ["C", "x3"],
+            ["A", "x1"],
+          ]) {
+            await clearInput(page, getSelector("27R"));
+            await page.select(getSelector("24R"), exportValue);
+            await page.waitForFunction(
+              `${getQuerySelector("27R")}.value !== ""`
+            );
+            const text = await page.$eval(getSelector("27R"), el => el.value);
+            expect(text)
+              .withContext(`In ${browserName}`)
+              .toEqual(`value=${value}, changeEx=${exportValue}`);
+            value = displayValue;
+          }
+
+          for (const exportValue of ["x3", "x2", "x1"]) {
+            await clearInput(page, getSelector("27R"));
+            await page.type(getSelector("27R"), exportValue);
+            await page.click("[data-annotation-id='28R']");
+            await page.waitForTimeout(10);
+
+            value = await page.$eval(getSelector("24R"), el => el.value);
+            expect(value).withContext(`In ${browserName}`).toEqual(exportValue);
+          }
+        })
+      );
+    });
+  });
+
+  describe("in issue15818.pdf", () => {
+    let pages;
+
+    beforeAll(async () => {
+      pages = await loadAndWait("issue15818.pdf", getSelector("27R"));
+    });
+
+    afterAll(async () => {
+      await closePages(pages);
+    });
+
+    it("must check the field value set when the document is open", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          await page.waitForFunction(
+            "window.PDFViewerApplication.scriptingReady === true"
+          );
+
+          await page.waitForFunction(`${getQuerySelector("27R")}.value !== ""`);
+
+          const text = await page.$eval(getSelector("27R"), el => el.value);
+          expect(text).withContext(`In ${browserName}`).toEqual("hello world");
+        })
+      );
+    });
+
+    it("must check the format action is called when setFocus is used", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          await page.waitForFunction(
+            "window.PDFViewerApplication.scriptingReady === true"
+          );
+
+          await page.type(getSelector("30R"), "abc");
+          await page.waitForFunction(
+            `${getQuerySelector("30R")}.value !== "abc"`
+          );
+          await page.waitForTimeout(10);
+
+          const focusedId = await page.evaluate(_ =>
+            window.document.activeElement.getAttribute("data-element-id")
+          );
+
+          expect(focusedId).withContext(`In ${browserName}`).toEqual("31R");
         })
       );
     });

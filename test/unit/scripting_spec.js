@@ -280,6 +280,18 @@ describe("Scripting", function () {
           `util.printf("Decimal number: %,0.2f", -12.34567)`
         );
         expect(value).toEqual("Decimal number: -12.35");
+
+        value = await myeval(`util.printf("Decimal number: %,0.0f", 4.95)`);
+        expect(value).toEqual("Decimal number: 5");
+
+        value = await myeval(`util.printf("Decimal number: %,0.0f", 4.49)`);
+        expect(value).toEqual("Decimal number: 4");
+
+        value = await myeval(`util.printf("Decimal number: %,0.0f", -4.95)`);
+        expect(value).toEqual("Decimal number: -5");
+
+        value = await myeval(`util.printf("Decimal number: %,0.0f", -4.49)`);
+        expect(value).toEqual("Decimal number: -4");
       });
 
       it("should print a string with no argument", async () => {
@@ -334,7 +346,7 @@ describe("Scripting", function () {
       expect(send_queue.has(refId)).toEqual(true);
       expect(send_queue.get(refId)).toEqual({
         id: refId,
-        value: "123",
+        value: 123,
       });
     });
 
@@ -814,7 +826,7 @@ describe("Scripting", function () {
         expect(send_queue.get(refId)).toEqual({
           id: refId,
           siblings: null,
-          value: "123456.789",
+          value: 123456.789,
           formattedValue: null,
         });
       });
@@ -994,7 +1006,7 @@ describe("Scripting", function () {
         expect(send_queue.get(refId)).toEqual({
           id: refId,
           siblings: null,
-          value: "321",
+          value: 321,
           formattedValue: null,
         });
       });

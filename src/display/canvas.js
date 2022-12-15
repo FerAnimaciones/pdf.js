@@ -1022,7 +1022,7 @@ class CanvasGraphics {
     commonObjs,
     objs,
     canvasFactory,
-    optionalContentConfig,
+    { optionalContentConfig, markedContentStack = null },
     annotationCanvasMap,
     pageColors
   ) {
@@ -1051,7 +1051,7 @@ class CanvasGraphics {
     this.tempSMask = null;
     this.suspendedCtx = null;
     this.contentVisible = true;
-    this.markedContentStack = [];
+    this.markedContentStack = markedContentStack || [];
     this.optionalContentConfig = optionalContentConfig;
     this.cachedCanvases = new CachedCanvases(this.canvasFactory);
     this.cachedPatterns = new Map();
@@ -1870,8 +1870,7 @@ class CanvasGraphics {
     this.ctx.closePath();
   }
 
-  stroke(consumePath) {
-    consumePath = typeof consumePath !== "undefined" ? consumePath : true;
+  stroke(consumePath = true) {
     const ctx = this.ctx;
     const strokeColor = this.current.strokeColor;
     // For stroke we want to temporarily change the global alpha to the
@@ -1904,8 +1903,7 @@ class CanvasGraphics {
     this.stroke();
   }
 
-  fill(consumePath) {
-    consumePath = typeof consumePath !== "undefined" ? consumePath : true;
+  fill(consumePath = true) {
     const ctx = this.ctx;
     const fillColor = this.current.fillColor;
     const isPatternFill = this.current.patternFill;
@@ -2471,7 +2469,11 @@ class CanvasGraphics {
             ctx,
             this.commonObjs,
             this.objs,
-            this.canvasFactory
+            this.canvasFactory,
+            {
+              optionalContentConfig: this.optionalContentConfig,
+              markedContentStack: this.markedContentStack,
+            }
           );
         },
       };
