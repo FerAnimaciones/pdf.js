@@ -68,6 +68,11 @@ const defaultOptions = {
     value: 0,
     kind: OptionKind.VIEWER + OptionKind.PREFERENCE,
   },
+  defaultZoomDelay: {
+    /** @type {number} */
+    value: 400,
+    kind: OptionKind.VIEWER + OptionKind.PREFERENCE,
+  },
   defaultZoomValue: {
     /** @type {string} */
     value: "",
@@ -263,6 +268,11 @@ const defaultOptions = {
       typeof PDFJSDev === "undefined" || !PDFJSDev.test("PRODUCTION")
         ? "../external/standard_fonts/"
         : "../web/standard_fonts/",
+    kind: OptionKind.API,
+  },
+  transferPdfData: {
+    /** @type {boolean} */
+    value: typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL"),
     kind: OptionKind.API,
   },
   verbosity: {

@@ -14,6 +14,8 @@
  */
 
 // eslint-disable-next-line max-len
+/** @typedef {import("./display/api").OnProgressParameters} OnProgressParameters */
+// eslint-disable-next-line max-len
 /** @typedef {import("./display/api").PDFDocumentLoadingTask} PDFDocumentLoadingTask */
 /** @typedef {import("./display/api").PDFDocumentProxy} PDFDocumentProxy */
 /** @typedef {import("./display/api").PDFPageProxy} PDFPageProxy */
@@ -46,7 +48,6 @@ import {
   getDocument,
   PDFDataRangeTransport,
   PDFWorker,
-  setPDFNetworkStreamFactory,
   version,
 } from "./display/api.js";
 import {
@@ -55,7 +56,6 @@ import {
   getXfaPageViewport,
   isDataScheme,
   isPdfFile,
-  isValidFetchUrl,
   loadScript,
   PDFDateString,
   PixelsPerInch,
@@ -67,7 +67,6 @@ import { AnnotationEditorLayer } from "./display/editor/annotation_editor_layer.
 import { AnnotationEditorUIManager } from "./display/editor/tools.js";
 import { AnnotationLayer } from "./display/annotation_layer.js";
 import { GlobalWorkerOptions } from "./display/worker_options.js";
-import { isNodeJS } from "./shared/is_node.js";
 import { SVGGraphics } from "./display/svg.js";
 import { XfaLayer } from "./display/xfa_layer.js";
 
@@ -77,39 +76,6 @@ const pdfjsVersion =
 /* eslint-disable-next-line no-unused-vars */
 const pdfjsBuild =
   typeof PDFJSDev !== "undefined" ? PDFJSDev.eval("BUNDLE_BUILD") : void 0;
-
-if (typeof PDFJSDev === "undefined" || !PDFJSDev.test("PRODUCTION")) {
-  const streamsPromise = Promise.all([
-    import("pdfjs/display/network.js"),
-    import("pdfjs/display/fetch_stream.js"),
-  ]);
-
-  setPDFNetworkStreamFactory(async params => {
-    const [{ PDFNetworkStream }, { PDFFetchStream }] = await streamsPromise;
-    if (isValidFetchUrl(params.url)) {
-      return new PDFFetchStream(params);
-    }
-    return new PDFNetworkStream(params);
-  });
-} else if (PDFJSDev.test("GENERIC || CHROME")) {
-  if (PDFJSDev.test("GENERIC") && isNodeJS) {
-    const { PDFNodeStream } = require("./display/node_stream.js");
-
-    setPDFNetworkStreamFactory(params => {
-      return new PDFNodeStream(params);
-    });
-  } else {
-    const { PDFNetworkStream } = require("./display/network.js");
-    const { PDFFetchStream } = require("./display/fetch_stream.js");
-
-    setPDFNetworkStreamFactory(params => {
-      if (isValidFetchUrl(params.url)) {
-        return new PDFFetchStream(params);
-      }
-      return new PDFNetworkStream(params);
-    });
-  }
-}
 
 export {
   AbortException,

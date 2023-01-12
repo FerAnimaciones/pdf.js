@@ -47,6 +47,7 @@ import {
   DOMCMapReaderFactory,
   DOMStandardFontDataFactory,
   isDataScheme,
+  isValidFetchUrl,
   loadScript,
   PageViewport,
   RenderingCancelledException,
@@ -81,32 +82,37 @@ if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("GENERIC") && isNodeJS) {
   DefaultStandardFontDataFactory = NodeStandardFontDataFactory;
 }
 
-/**
- * @typedef {function} IPDFStreamFactory
- * @param {DocumentInitParameters} params - The document initialization
- *   parameters. The "url" key is always present.
- * @returns {Promise} A promise, which is resolved with an instance of
- *   {IPDFStream}.
- * @ignore
- */
-
-/**
- * @type {IPDFStreamFactory}
- * @private
- */
 let createPDFNetworkStream;
+if (typeof PDFJSDev === "undefined" || !PDFJSDev.test("PRODUCTION")) {
+  const streamsPromise = Promise.all([
+    import("./network.js"),
+    import("./fetch_stream.js"),
+  ]);
 
-/**
- * Sets the function that instantiates an {IPDFStream} as an alternative PDF
- * data transport.
- *
- * @param {IPDFStreamFactory} pdfNetworkStreamFactory - The factory function
- *   that takes document initialization parameters (including a "url") and
- *   returns a promise which is resolved with an instance of {IPDFStream}.
- * @ignore
- */
-function setPDFNetworkStreamFactory(pdfNetworkStreamFactory) {
-  createPDFNetworkStream = pdfNetworkStreamFactory;
+  createPDFNetworkStream = async params => {
+    const [{ PDFNetworkStream }, { PDFFetchStream }] = await streamsPromise;
+
+    return isValidFetchUrl(params.url)
+      ? new PDFFetchStream(params)
+      : new PDFNetworkStream(params);
+  };
+} else if (PDFJSDev.test("GENERIC || CHROME")) {
+  if (PDFJSDev.test("GENERIC") && isNodeJS) {
+    const { PDFNodeStream } = require("./node_stream.js");
+
+    createPDFNetworkStream = params => {
+      return new PDFNodeStream(params);
+    };
+  } else {
+    const { PDFNetworkStream } = require("./network.js");
+    const { PDFFetchStream } = require("./fetch_stream.js");
+
+    createPDFNetworkStream = params => {
+      return isValidFetchUrl(params.url)
+        ? new PDFFetchStream(params)
+        : new PDFNetworkStream(params);
+    };
+  }
 }
 
 /**
@@ -140,9 +146,6 @@ function setPDFNetworkStreamFactory(pdfNetworkStreamFactory) {
  *   cross-site Access-Control requests should be made using credentials such
  *   as cookies or authorization headers. The default is `false`.
  * @property {string} [password] - For decrypting password-protected PDFs.
- * @property {TypedArray} [initialData] - A typed array with the first portion
- *   or all of the pdf data. Used by the extension since some data is already
- *   loaded before the switch to range requests.
  * @property {number} [length] - The PDF file length. It's used for progress
  *   reports and range requests operations.
  * @property {PDFDataRangeTransport} [range] - Allows for using a custom range
@@ -186,6 +189,14 @@ function setPDFNetworkStreamFactory(pdfNetworkStreamFactory) {
  * @property {number} [maxImageSize] - The maximum allowed image size in total
  *   pixels, i.e. width * height. Images above this value will not be rendered.
  *   Use -1 for no limit, which is also the default value.
+ * @property {boolean} [transferPdfData] - Determines if we can transfer
+ *   TypedArrays used for loading the PDF file, utilized together with:
+ *    - The `data`-option, for the `getDocument` function.
+ *    - The `initialData`-option, for the `PDFDataRangeTransport` constructor.
+ *    - The `chunk`-option, for the `PDFDataTransportStream._onReceiveData`
+ *      method.
+ *   This will help reduce main-thread memory usage, however it will take
+ *   ownership of the TypedArrays. The default value is `false`.
  * @property {boolean} [isEvalSupported] - Determines if we can evaluate strings
  *   as JavaScript. Primarily used to improve performance of font rendering, and
  *   when parsing PDF functions. The default value is `true`.
@@ -336,6 +347,7 @@ function getDocument(src) {
   params.StandardFontDataFactory =
     params.StandardFontDataFactory || DefaultStandardFontDataFactory;
   params.ignoreErrors = params.stopAtErrors !== true;
+  params.transferPdfData = params.transferPdfData === true;
   params.fontExtraProperties = params.fontExtraProperties === true;
   params.pdfBug = params.pdfBug === true;
   params.enableXfa = params.enableXfa === true;
@@ -363,8 +375,11 @@ function getDocument(src) {
   }
   if (typeof params.useWorkerFetch !== "boolean") {
     params.useWorkerFetch =
-      params.CMapReaderFactory === DOMCMapReaderFactory &&
-      params.StandardFontDataFactory === DOMStandardFontDataFactory;
+      (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) ||
+      (params.CMapReaderFactory === DOMCMapReaderFactory &&
+        params.StandardFontDataFactory === DOMStandardFontDataFactory &&
+        isValidFetchUrl(params.cMapUrl, document.baseURI) &&
+        isValidFetchUrl(params.standardFontDataUrl, document.baseURI));
   }
   if (typeof params.isEvalSupported !== "boolean") {
     params.isEvalSupported = true;
@@ -430,6 +445,7 @@ function getDocument(src) {
             {
               length: params.length,
               initialData: params.initialData,
+              transferPdfData: params.transferPdfData,
               progressiveDone: params.progressiveDone,
               contentDispositionFilename: params.contentDispositionFilename,
               disableRange: params.disableRange,
@@ -438,6 +454,9 @@ function getDocument(src) {
             rangeTransport
           );
         } else if (!params.data) {
+          if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) {
+            throw new Error("Not implemented: createPDFNetworkStream");
+          }
           networkStream = createPDFNetworkStream({
             url: params.url,
             length: params.length,
@@ -501,6 +520,9 @@ async function _fetchDocument(worker, source, pdfDataRangeTransport, docId) {
     source.contentDispositionFilename =
       pdfDataRangeTransport.contentDispositionFilename;
   }
+  const transfers =
+    source.transferPdfData && source.data ? [source.data.buffer] : null;
+
   const workerId = await worker.messageHandler.sendWithPromise(
     "GetDocRequest",
     // Only send the required properties, and *not* the entire `source` object.
@@ -530,14 +552,9 @@ async function _fetchDocument(worker, source, pdfDataRangeTransport, docId) {
           ? source.standardFontDataUrl
           : null,
       },
-    }
+    },
+    transfers
   );
-
-  // Release the TypedArray data, when it exists, since it's no longer needed
-  // on the main-thread *after* it's been sent to the worker-thread.
-  if (source.data) {
-    source.data = null;
-  }
 
   if (worker.destroyed) {
     throw new Error("Worker was destroyed");
@@ -609,10 +626,12 @@ class PDFDocumentLoadingTask {
    * @type {function}
    */
   set onUnsupportedFeature(callback) {
-    deprecated(
-      "The PDFDocumentLoadingTask onUnsupportedFeature property will be removed in the future."
-    );
-    this.#onUnsupportedFeature = callback;
+    if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
+      deprecated(
+        "The PDFDocumentLoadingTask onUnsupportedFeature property will be removed in the future."
+      );
+      this.#onUnsupportedFeature = callback;
+    }
   }
 
   /**
@@ -646,7 +665,7 @@ class PDFDocumentLoadingTask {
 class PDFDataRangeTransport {
   /**
    * @param {number} length
-   * @param {Uint8Array} initialData
+   * @param {Uint8Array|null} initialData
    * @param {boolean} [progressiveDone]
    * @param {string} [contentDispositionFilename]
    */
@@ -668,28 +687,48 @@ class PDFDataRangeTransport {
     this._readyCapability = createPromiseCapability();
   }
 
+  /**
+   * @param {function} listener
+   */
   addRangeListener(listener) {
     this._rangeListeners.push(listener);
   }
 
+  /**
+   * @param {function} listener
+   */
   addProgressListener(listener) {
     this._progressListeners.push(listener);
   }
 
+  /**
+   * @param {function} listener
+   */
   addProgressiveReadListener(listener) {
     this._progressiveReadListeners.push(listener);
   }
 
+  /**
+   * @param {function} listener
+   */
   addProgressiveDoneListener(listener) {
     this._progressiveDoneListeners.push(listener);
   }
 
+  /**
+   * @param {number} begin
+   * @param {Uint8Array|null} chunk
+   */
   onDataRange(begin, chunk) {
     for (const listener of this._rangeListeners) {
       listener(begin, chunk);
     }
   }
 
+  /**
+   * @param {number} loaded
+   * @param {number|undefined} total
+   */
   onDataProgress(loaded, total) {
     this._readyCapability.promise.then(() => {
       for (const listener of this._progressListeners) {
@@ -698,6 +737,9 @@ class PDFDataRangeTransport {
     });
   }
 
+  /**
+   * @param {Uint8Array|null} chunk
+   */
   onDataProgressiveRead(chunk) {
     this._readyCapability.promise.then(() => {
       for (const listener of this._progressiveReadListeners) {
@@ -718,6 +760,10 @@ class PDFDataRangeTransport {
     this._readyCapability.resolve();
   }
 
+  /**
+   * @param {number} begin
+   * @param {number} end
+   */
   requestDataRange(begin, end) {
     unreachable("Abstract method PDFDataRangeTransport.requestDataRange");
   }
@@ -759,31 +805,10 @@ class PDFDocumentProxy {
   }
 
   /**
-   * @typedef {Object} PDFDocumentStats
-   * @property {Object<string, boolean>} streamTypes - Used stream types in the
-   *   document (an item is set to true if specific stream ID was used in the
-   *   document).
-   * @property {Object<string, boolean>} fontTypes - Used font types in the
-   *   document (an item is set to true if specific font ID was used in the
-   *   document).
-   */
-
-  /**
-   * @type {PDFDocumentStats | null} The current statistics about document
-   *   structures, or `null` when no statistics exists.
-   */
-  get stats() {
-    deprecated(
-      "The PDFDocumentProxy stats property will be removed in the future."
-    );
-    return this._transport.stats;
-  }
-
-  /**
    * @type {boolean} True if only XFA form.
    */
   get isPureXfa() {
-    return !!this._transport._htmlForXfa;
+    return shadow(this, "isPureXfa", !!this._transport._htmlForXfa);
   }
 
   /**
@@ -1338,9 +1363,14 @@ class PDFPageProxy {
    *   {Object} with JS actions.
    */
   getJSActions() {
-    return (this._jsActionsPromise ||= this._transport.getPageJSActions(
-      this._pageIndex
-    ));
+    return this._transport.getPageJSActions(this._pageIndex);
+  }
+
+  /**
+   * @type {boolean} True if only XFA form.
+   */
+  get isPureXfa() {
+    return shadow(this, "isPureXfa", !!this._transport._htmlForXfa);
   }
 
   /**
@@ -1649,7 +1679,6 @@ class PDFPageProxy {
       bitmap.close();
     }
     this._bitmaps.clear();
-    this._jsActionsPromise = null;
     this.pendingCleanup = false;
     return Promise.all(waitOn);
   }
@@ -1682,7 +1711,6 @@ class PDFPageProxy {
 
     this._intentStates.clear();
     this.objs.clear();
-    this._jsActionsPromise = null;
     if (resetStats && this._stats) {
       this._stats = new StatTimer();
     }
@@ -1818,6 +1846,12 @@ class PDFPageProxy {
     if (!intentState.streamReader) {
       return;
     }
+    // Ensure that a pending `streamReader` cancel timeout is always aborted.
+    if (intentState.streamReaderCancelTimeout) {
+      clearTimeout(intentState.streamReaderCancelTimeout);
+      intentState.streamReaderCancelTimeout = null;
+    }
+
     if (!force) {
       // Ensure that an Error occurring in *only* one `InternalRenderTask`, e.g.
       // multiple render() calls on the same canvas, won't break all rendering.
@@ -1834,12 +1868,9 @@ class PDFPageProxy {
           delay += reason.extraDelay;
         }
 
-        if (intentState.streamReaderCancelTimeout) {
-          clearTimeout(intentState.streamReaderCancelTimeout);
-        }
         intentState.streamReaderCancelTimeout = setTimeout(() => {
-          this._abortOperatorList({ intentState, reason, force: true });
           intentState.streamReaderCancelTimeout = null;
+          this._abortOperatorList({ intentState, reason, force: true });
         }, delay);
         return;
       }
@@ -2290,8 +2321,6 @@ class PDFWorker {
  * @ignore
  */
 class WorkerTransport {
-  #docStats = null;
-
   #pageCache = new Map();
 
   #pagePromises = new Map();
@@ -2333,10 +2362,6 @@ class WorkerTransport {
 
   get annotationStorage() {
     return shadow(this, "annotationStorage", new AnnotationStorage());
-  }
-
-  get stats() {
-    return this.#docStats;
   }
 
   getRenderingIntent(
@@ -2769,22 +2794,12 @@ class WorkerTransport {
       });
     });
 
-    messageHandler.on("DocStats", data => {
-      if (this.destroyed) {
-        return; // Ignore any pending requests if the worker was terminated.
-      }
-      // Ensure that a `PDFDocumentProxy.stats` call-site cannot accidentally
-      // modify this internal data.
-      this.#docStats = Object.freeze({
-        streamTypes: Object.freeze(data.streamTypes),
-        fontTypes: Object.freeze(data.fontTypes),
-      });
-    });
-
-    messageHandler.on(
-      "UnsupportedFeature",
-      this._onUnsupportedFeature.bind(this)
-    );
+    if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
+      messageHandler.on(
+        "UnsupportedFeature",
+        this._onUnsupportedFeature.bind(this)
+      );
+    }
 
     messageHandler.on("FetchBuiltInCMap", data => {
       if (this.destroyed) {
@@ -2816,10 +2831,12 @@ class WorkerTransport {
   }
 
   _onUnsupportedFeature({ featureId }) {
-    if (this.destroyed) {
-      return; // Ignore any pending requests if the worker was terminated.
+    if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
+      if (this.destroyed) {
+        return; // Ignore any pending requests if the worker was terminated.
+      }
+      this.loadingTask.onUnsupportedFeature?.(featureId);
     }
-    this.loadingTask.onUnsupportedFeature?.(featureId);
   }
 
   getData() {
@@ -3376,6 +3393,5 @@ export {
   PDFWorker,
   PDFWorkerUtil,
   RenderTask,
-  setPDFNetworkStreamFactory,
   version,
 };

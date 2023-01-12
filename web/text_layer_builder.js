@@ -59,6 +59,7 @@ class TextLayerBuilder {
 
     this.div = document.createElement("div");
     this.div.className = "textLayer";
+    this.hide();
   }
 
   #finishRendering() {
@@ -85,8 +86,8 @@ class TextLayerBuilder {
     }
 
     const scale = viewport.scale * (globalThis.devicePixelRatio || 1);
+    const { rotation } = viewport;
     if (this.renderingDone) {
-      const { rotation } = viewport;
       const mustRotate = rotation !== this.#rotation;
       const mustRescale = scale !== this.#scale;
       if (mustRotate || mustRescale) {
@@ -100,10 +101,10 @@ class TextLayerBuilder {
           mustRescale,
           mustRotate,
         });
-        this.show();
         this.#scale = scale;
         this.#rotation = rotation;
       }
+      this.show();
       return;
     }
 
@@ -124,20 +125,25 @@ class TextLayerBuilder {
     await this.textLayerRenderTask.promise;
     this.#finishRendering();
     this.#scale = scale;
-    this.accessibilityManager?.enable();
+    this.#rotation = rotation;
     this.show();
+    this.accessibilityManager?.enable();
   }
 
   hide() {
-    // We turn off the highlighter in order to avoid to scroll into view an
-    // element of the text layer which could be hidden.
-    this.highlighter?.disable();
-    this.div.hidden = true;
+    if (!this.div.hidden) {
+      // We turn off the highlighter in order to avoid to scroll into view an
+      // element of the text layer which could be hidden.
+      this.highlighter?.disable();
+      this.div.hidden = true;
+    }
   }
 
   show() {
-    this.div.hidden = false;
-    this.highlighter?.enable();
+    if (this.div.hidden && this.renderingDone) {
+      this.div.hidden = false;
+      this.highlighter?.enable();
+    }
   }
 
   /**

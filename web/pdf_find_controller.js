@@ -339,18 +339,26 @@ function getOriginalIndex(diffs, pos, len) {
  * @typedef {Object} PDFFindControllerOptions
  * @property {IPDFLinkService} linkService - The navigation/linking service.
  * @property {EventBus} eventBus - The application event bus.
+ * @property {boolean} updateMatchesCountOnProgress - True if the matches
+ *   count must be updated on progress or only when the last page is reached.
+ *   The default value is `true`.
  */
 
 /**
  * Provides search functionality to find a given string in a PDF document.
  */
 class PDFFindController {
+  #updateMatchesCountOnProgress = true;
+
+  #visitedPagesCount = 0;
+
   /**
    * @param {PDFFindControllerOptions} options
    */
-  constructor({ linkService, eventBus }) {
+  constructor({ linkService, eventBus, updateMatchesCountOnProgress = true }) {
     this._linkService = linkService;
     this._eventBus = eventBus;
+    this.#updateMatchesCountOnProgress = updateMatchesCountOnProgress;
 
     this.#reset();
     eventBus._on("find", this.#onFind.bind(this));
@@ -489,6 +497,7 @@ class PDFFindController {
     this._pdfDocument = null;
     this._pageMatches = [];
     this._pageMatchesLength = [];
+    this.#visitedPagesCount = 0;
     this._state = null;
     // Currently selected match.
     this._selected = {
@@ -591,9 +600,13 @@ class PDFFindController {
   }
 
   #calculateRegExpMatch(query, entireWord, pageIndex, pageContent) {
-    const matches = [],
-      matchesLength = [];
-
+    const matches = (this._pageMatches[pageIndex] = []);
+    const matchesLength = (this._pageMatchesLength[pageIndex] = []);
+    if (!query) {
+      // The query can be empty because some chars like diacritics could have
+      // been stripped out.
+      return;
+    }
     const diffs = this._pageDiffs[pageIndex];
     let match;
     while ((match = query.exec(pageContent)) !== null) {
@@ -615,8 +628,6 @@ class PDFFindController {
         matchesLength.push(matchLen);
       }
     }
-    this._pageMatches[pageIndex] = matches;
-    this._pageMatchesLength[pageIndex] = matchesLength;
   }
 
   #convertToRegExpString(query, hasDiacritics) {
@@ -691,7 +702,7 @@ class PDFFindController {
 
   #calculateMatch(pageIndex) {
     let query = this.#query;
-    if (query.length === 0) {
+    if (!query) {
       // Do nothing: the matches should be wiped out already.
       return;
     }
@@ -724,7 +735,7 @@ class PDFFindController {
     }
 
     const flags = `g${isUnicode ? "u" : ""}${caseSensitive ? "" : "i"}`;
-    query = new RegExp(query, flags);
+    query = query ? new RegExp(query, flags) : null;
 
     this.#calculateRegExpMatch(query, entireWord, pageIndex, pageContent);
 
@@ -740,8 +751,14 @@ class PDFFindController {
 
     // Update the match count.
     const pageMatchesCount = this._pageMatches[pageIndex].length;
-    if (pageMatchesCount > 0) {
-      this._matchesCountTotal += pageMatchesCount;
+    this._matchesCountTotal += pageMatchesCount;
+    if (this.#updateMatchesCountOnProgress) {
+      if (pageMatchesCount > 0) {
+        this.#updateUIResultsCount();
+      }
+    } else if (++this.#visitedPagesCount === this._linkService.pagesCount) {
+      // For example, in GeckoView we want to have only the final update because
+      // the Java side provides only one object to update the counts.
       this.#updateUIResultsCount();
     }
   }
@@ -836,6 +853,7 @@ class PDFFindController {
       this._resumePageIdx = null;
       this._pageMatches.length = 0;
       this._pageMatchesLength.length = 0;
+      this.#visitedPagesCount = 0;
       this._matchesCountTotal = 0;
 
       this.#updateAllPages(); // Wipe out any previously highlighted matches.
@@ -854,7 +872,7 @@ class PDFFindController {
     }
 
     // If there's no query there's no point in searching.
-    if (this.#query === "") {
+    if (!this.#query) {
       this.#updateUIState(FindState.FOUND);
       return;
     }

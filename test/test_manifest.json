@@ -386,6 +386,13 @@
       "lastPage": 4,
       "type": "eq"
     },
+    {  "id": "issue15893_reduced",
+       "file": "pdfs/issue15893_reduced.pdf",
+       "md5": "cf889b927f9f53d164622a99378bf39d",
+       "rounds": 1,
+       "type": "eq",
+       "password": "test"
+    },
     {  "id": "bug1727053",
        "file": "pdfs/bug1727053.pdf",
        "md5": "8ed1e52da64000f9fdcb8b732f5a58f8",
@@ -1760,6 +1767,15 @@
        "rounds": 1,
        "link": false,
        "type": "eq"
+    },
+    {  "id": "issue15803",
+       "file": "pdfs/issue15803.pdf",
+       "md5": "e501a4418d4ece5be7ce4e8acf029100",
+       "rounds": 1,
+       "link": true,
+       "lastPage": 1,
+       "type": "eq",
+       "annotations": true
     },
     {  "id": "issue9105_other",
        "file": "pdfs/issue9105_other.pdf",
@@ -7275,5 +7291,13 @@
             "value": "x2"
          }
       }
+   },
+   {
+      "id": "issue15784",
+      "file": "pdfs/issue15784.pdf",
+      "md5": "6e4fce8e36d960955a7476b862f58939",
+      "rounds": 1,
+      "link": true,
+      "type": "eq"
    }
 ]

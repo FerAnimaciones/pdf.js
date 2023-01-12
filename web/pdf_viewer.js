@@ -22,18 +22,7 @@
 /** @typedef {import("./event_utils").EventBus} EventBus */
 /** @typedef {import("./interfaces").IDownloadManager} IDownloadManager */
 /** @typedef {import("./interfaces").IL10n} IL10n */
-// eslint-disable-next-line max-len
-/** @typedef {import("./interfaces").IPDFAnnotationLayerFactory} IPDFAnnotationLayerFactory */
-// eslint-disable-next-line max-len
-/** @typedef {import("./interfaces").IPDFAnnotationEditorLayerFactory} IPDFAnnotationEditorLayerFactory */
 /** @typedef {import("./interfaces").IPDFLinkService} IPDFLinkService */
-// eslint-disable-next-line max-len
-/** @typedef {import("./interfaces").IPDFStructTreeLayerFactory} IPDFStructTreeLayerFactory */
-// eslint-disable-next-line max-len
-/** @typedef {import("./interfaces").IPDFTextLayerFactory} IPDFTextLayerFactory */
-/** @typedef {import("./interfaces").IPDFXfaLayerFactory} IPDFXfaLayerFactory */
-// eslint-disable-next-line max-len
-/** @typedef {import("./text_accessibility.js").TextAccessibilityManager} TextAccessibilityManager */
 
 import {
   AnnotationEditorType,
@@ -69,16 +58,10 @@ import {
   VERTICAL_PADDING,
   watchScroll,
 } from "./ui_utils.js";
-import { AnnotationEditorLayerBuilder } from "./annotation_editor_layer_builder.js";
-import { AnnotationLayerBuilder } from "./annotation_layer_builder.js";
 import { NullL10n } from "./l10n_utils.js";
 import { PDFPageView } from "./pdf_page_view.js";
 import { PDFRenderingQueue } from "./pdf_rendering_queue.js";
 import { SimpleLinkService } from "./pdf_link_service.js";
-import { StructTreeLayerBuilder } from "./struct_tree_layer_builder.js";
-import { TextHighlighter } from "./text_highlighter.js";
-import { TextLayerBuilder } from "./text_layer_builder.js";
-import { XfaLayerBuilder } from "./xfa_layer_builder.js";
 
 const DEFAULT_CACHE_SIZE = 10;
 const ENABLE_PERMISSIONS_CLASS = "enablePermissions";
@@ -211,12 +194,6 @@ class PDFPageViewBuffer {
 
 /**
  * Simple viewer control to display PDF content/pages.
- *
- * @implements {IPDFAnnotationLayerFactory}
- * @implements {IPDFAnnotationEditorLayerFactory}
- * @implements {IPDFStructTreeLayerFactory}
- * @implements {IPDFTextLayerFactory}
- * @implements {IPDFXfaLayerFactory}
  */
 class PDFViewer {
   #buffer = null;
@@ -227,13 +204,19 @@ class PDFViewer {
 
   #annotationMode = AnnotationMode.ENABLE_FORMS;
 
+  #containerTopLeft = null;
+
   #enablePermissions = false;
 
   #previousContainerHeight = 0;
 
+  #resizeObserver = new ResizeObserver(this.#resizeObserverCallback.bind(this));
+
   #scrollModePageState = null;
 
   #onVisibilityChange = null;
+
+  #scaleTimeoutId = null;
 
   /**
    * @param {PDFViewerOptions} options
@@ -253,12 +236,7 @@ class PDFViewer {
       typeof PDFJSDev === "undefined" ||
       PDFJSDev.test("!PRODUCTION || GENERIC")
     ) {
-      if (
-        !(
-          this.container?.tagName.toUpperCase() === "DIV" &&
-          this.viewer?.tagName.toUpperCase() === "DIV"
-        )
-      ) {
+      if (this.container?.tagName !== "DIV" || this.viewer?.tagName !== "DIV") {
         throw new Error("Invalid `container` and/or `viewer` option.");
       }
 
@@ -269,6 +247,8 @@ class PDFViewer {
         throw new Error("The `container` must be absolutely positioned.");
       }
     }
+    this.#resizeObserver.observe(this.container);
+
     this.eventBus = options.eventBus;
     this.linkService = options.linkService || new SimpleLinkService();
     this.downloadManager = options.downloadManager || null;
@@ -330,7 +310,8 @@ class PDFViewer {
     if (this.removePageBorders) {
       this.viewer.classList.add("removePageBorders");
     }
-    this.updateContainerHeightCss();
+
+    this.#updateContainerHeightCss();
   }
 
   get pagesCount() {
@@ -470,7 +451,7 @@ class PDFViewer {
     if (!this.pdfDocument) {
       return;
     }
-    this._setScale(val, false);
+    this._setScale(val, { noScroll: false });
   }
 
   /**
@@ -487,7 +468,7 @@ class PDFViewer {
     if (!this.pdfDocument) {
       return;
     }
-    this._setScale(val, false);
+    this._setScale(val, { noScroll: false });
   }
 
   /**
@@ -519,14 +500,12 @@ class PDFViewer {
 
     const pageNumber = this._currentPageNumber;
 
-    const updateArgs = { rotation };
-    for (const pageView of this._pages) {
-      pageView.update(updateArgs);
-    }
+    this.refresh(true, { rotation });
+
     // Prevent errors in case the rotation changes *before* the scale has been
     // set to a non-default value.
     if (this._currentScaleValue) {
-      this._setScale(this._currentScaleValue, true);
+      this._setScale(this._currentScaleValue, { noScroll: true });
     }
 
     this.eventBus.dispatch("rotationchanging", {
@@ -550,6 +529,36 @@ class PDFViewer {
 
   get pagesPromise() {
     return this.pdfDocument ? this._pagesCapability.promise : null;
+  }
+
+  #layerProperties() {
+    const self = this;
+    return {
+      get annotationEditorUIManager() {
+        return self.#annotationEditorUIManager;
+      },
+      get annotationStorage() {
+        return self.pdfDocument?.annotationStorage;
+      },
+      get downloadManager() {
+        return self.downloadManager;
+      },
+      get enableScripting() {
+        return !!self._scriptingManager;
+      },
+      get fieldObjectsPromise() {
+        return self.pdfDocument?.getFieldObjects();
+      },
+      get findController() {
+        return self.findController;
+      },
+      get hasJSActionsPromise() {
+        return self.pdfDocument?.hasJSActions();
+      },
+      get linkService() {
+        return self.linkService;
+      },
+    };
   }
 
   /**
@@ -651,7 +660,6 @@ class PDFViewer {
     if (!pdfDocument) {
       return;
     }
-    const isPureXfa = pdfDocument.isPureXfa;
     const pagesCount = pdfDocument.numPages;
     const firstPagePromise = pdfDocument.getPage(1);
     // Rendering (potentially) depends on this, hence fetching it immediately.
@@ -725,13 +733,13 @@ class PDFViewer {
         if (annotationEditorMode !== AnnotationEditorType.DISABLE) {
           const mode = annotationEditorMode;
 
-          if (isPureXfa) {
+          if (pdfDocument.isPureXfa) {
             console.warn("Warning: XFA-editing is not implemented.");
           } else if (isValidAnnotationEditorMode(mode)) {
             this.#annotationEditorUIManager = new AnnotationEditorUIManager(
               this.container,
               this.eventBus,
-              this.pdfDocument?.annotationStorage
+              pdfDocument?.annotationStorage
             );
             if (mode !== AnnotationEditorType.NONE) {
               this.#annotationEditorUIManager.updateMode(mode);
@@ -741,6 +749,7 @@ class PDFViewer {
           }
         }
 
+        const layerProperties = this.#layerProperties.bind(this);
         const viewerElement =
           this._scrollMode === ScrollMode.PAGE ? null : this.viewer;
         const scale = this.currentScale;
@@ -751,15 +760,6 @@ class PDFViewer {
         // see issue 15795.
         docStyle.setProperty("--scale-factor", viewport.scale);
 
-        const textLayerFactory =
-          textLayerMode !== TextLayerMode.DISABLE && !isPureXfa ? this : null;
-        const annotationLayerFactory =
-          annotationMode !== AnnotationMode.DISABLE ? this : null;
-        const xfaLayerFactory = isPureXfa ? this : null;
-        const annotationEditorLayerFactory = this.#annotationEditorUIManager
-          ? this
-          : null;
-
         for (let pageNum = 1; pageNum <= pagesCount; ++pageNum) {
           const pageView = new PDFPageView({
             container: viewerElement,
@@ -769,14 +769,8 @@ class PDFViewer {
             defaultViewport: viewport.clone(),
             optionalContentConfigPromise,
             renderingQueue: this.renderingQueue,
-            textLayerFactory,
             textLayerMode,
-            annotationLayerFactory,
             annotationMode,
-            xfaLayerFactory,
-            annotationEditorLayerFactory,
-            textHighlighterFactory: this,
-            structTreeLayerFactory: this,
             imageResourcesPath: this.imageResourcesPath,
             renderer:
               typeof PDFJSDev === "undefined" ||
@@ -788,6 +782,7 @@ class PDFViewer {
             maxCanvasPixels: this.maxCanvasPixels,
             pageColors: this.pageColors,
             l10n: this.l10n,
+            layerProperties,
           });
           this._pages.push(pageView);
         }
@@ -1080,7 +1075,11 @@ class PDFViewer {
     );
   }
 
-  _setScaleUpdatePages(newScale, newValue, noScroll = false, preset = false) {
+  _setScaleUpdatePages(
+    newScale,
+    newValue,
+    { noScroll = false, preset = false, drawingDelay = -1 }
+  ) {
     this._currentScaleValue = newValue.toString();
 
     if (this.#isSameScale(newScale)) {
@@ -1099,10 +1098,19 @@ class PDFViewer {
       newScale * PixelsPerInch.PDF_TO_CSS_UNITS
     );
 
-    const updateArgs = { scale: newScale };
-    for (const pageView of this._pages) {
-      pageView.update(updateArgs);
+    const postponeDrawing = drawingDelay >= 0 && drawingDelay < 1000;
+    this.refresh(true, {
+      scale: newScale,
+      drawingDelay: postponeDrawing ? drawingDelay : -1,
+    });
+
+    if (postponeDrawing) {
+      this.#scaleTimeoutId = setTimeout(() => {
+        this.#scaleTimeoutId = null;
+        this.refresh();
+      }, drawingDelay);
     }
+
     this._currentScale = newScale;
 
     if (!noScroll) {
@@ -1137,7 +1145,6 @@ class PDFViewer {
     if (this.defaultRenderingQueue) {
       this.update();
     }
-    this.updateContainerHeightCss();
   }
 
   /**
@@ -1153,11 +1160,12 @@ class PDFViewer {
     return 1;
   }
 
-  _setScale(value, noScroll = false) {
+  _setScale(value, options) {
     let scale = parseFloat(value);
 
     if (scale > 0) {
-      this._setScaleUpdatePages(scale, value, noScroll, /* preset = */ false);
+      options.preset = false;
+      this._setScaleUpdatePages(scale, value, options);
     } else {
       const currentPage = this._pages[this._currentPageNumber - 1];
       if (!currentPage) {
@@ -1212,7 +1220,8 @@ class PDFViewer {
           console.error(`_setScale: "${value}" is an unknown zoom value.`);
           return;
       }
-      this._setScaleUpdatePages(scale, value, noScroll, /* preset = */ true);
+      options.preset = true;
+      this._setScaleUpdatePages(scale, value, options);
     }
   }
 
@@ -1224,7 +1233,7 @@ class PDFViewer {
 
     if (this.isInPresentationMode) {
       // Fixes the case when PDF has different page sizes.
-      this._setScale(this._currentScaleValue, true);
+      this._setScale(this._currentScaleValue, { noScroll: true });
     }
     this.#scrollIntoView(pageView);
   }
@@ -1609,23 +1618,6 @@ class PDFViewer {
     return this.scroll.down;
   }
 
-  /**
-   * Only show the `loadingIcon`-spinner on visible pages (see issue 14242).
-   */
-  #toggleLoadingIconSpinner(visibleIds) {
-    for (const id of visibleIds) {
-      const pageView = this._pages[id - 1];
-      pageView?.toggleLoadingIconSpinner(/* viewVisible = */ true);
-    }
-    for (const pageView of this.#buffer) {
-      if (visibleIds.has(pageView.id)) {
-        // Handled above, since the "buffer" may not contain all visible pages.
-        continue;
-      }
-      pageView.toggleLoadingIconSpinner(/* viewVisible = */ false);
-    }
-  }
-
   forceRendering(currentlyVisiblePages) {
     const visiblePages = currentlyVisiblePages || this._getVisiblePages();
     const scrollAhead = this.#getScrollAhead(visiblePages);
@@ -1639,7 +1631,6 @@ class PDFViewer {
       scrollAhead,
       preRenderExtra
     );
-    this.#toggleLoadingIconSpinner(visiblePages.ids);
 
     if (pageView) {
       this.#ensurePdfPageLoaded(pageView).then(() => {
@@ -1648,161 +1639,6 @@ class PDFViewer {
       return true;
     }
     return false;
-  }
-
-  /**
-   * @typedef {Object} CreateTextLayerBuilderParameters
-   * @property {TextHighlighter} highlighter
-   * @property {TextAccessibilityManager} [accessibilityManager]
-   * @property {boolean} [isOffscreenCanvasSupported]
-   */
-
-  /**
-   * @param {CreateTextLayerBuilderParameters}
-   * @returns {TextLayerBuilder}
-   */
-  createTextLayerBuilder({
-    highlighter,
-    accessibilityManager = null,
-    isOffscreenCanvasSupported = true,
-  }) {
-    return new TextLayerBuilder({
-      highlighter,
-      accessibilityManager,
-      isOffscreenCanvasSupported,
-    });
-  }
-
-  /**
-   * @typedef {Object} CreateTextHighlighterParameters
-   * @property {number} pageIndex
-   * @property {EventBus} eventBus
-   */
-
-  /**
-   * @param {CreateTextHighlighterParameters}
-   * @returns {TextHighlighter}
-   */
-  createTextHighlighter({ pageIndex, eventBus }) {
-    return new TextHighlighter({
-      eventBus,
-      pageIndex,
-      findController: this.findController,
-    });
-  }
-
-  /**
-   * @typedef {Object} CreateAnnotationLayerBuilderParameters
-   * @property {HTMLDivElement} pageDiv
-   * @property {PDFPageProxy} pdfPage
-   * @property {AnnotationStorage} [annotationStorage] - Storage for annotation
-   *   data in forms.
-   * @property {string} [imageResourcesPath] - Path for image resources, mainly
-   *   for annotation icons. Include trailing slash.
-   * @property {boolean} renderForms
-   * @property {IL10n} l10n
-   * @property {boolean} [enableScripting]
-   * @property {Promise<boolean>} [hasJSActionsPromise]
-   * @property {Promise<Object<string, Array<Object>> | null>}
-   *   [fieldObjectsPromise]
-   * @property {Map<string, HTMLCanvasElement>} [annotationCanvasMap] - Map some
-   *   annotation ids with canvases used to render them.
-   * @property {TextAccessibilityManager} [accessibilityManager]
-   */
-
-  /**
-   * @param {CreateAnnotationLayerBuilderParameters}
-   * @returns {AnnotationLayerBuilder}
-   */
-  createAnnotationLayerBuilder({
-    pageDiv,
-    pdfPage,
-    annotationStorage = this.pdfDocument?.annotationStorage,
-    imageResourcesPath = "",
-    renderForms = true,
-    l10n = NullL10n,
-    enableScripting = this.enableScripting,
-    hasJSActionsPromise = this.pdfDocument?.hasJSActions(),
-    fieldObjectsPromise = this.pdfDocument?.getFieldObjects(),
-    annotationCanvasMap = null,
-    accessibilityManager = null,
-  }) {
-    return new AnnotationLayerBuilder({
-      pageDiv,
-      pdfPage,
-      annotationStorage,
-      imageResourcesPath,
-      renderForms,
-      linkService: this.linkService,
-      downloadManager: this.downloadManager,
-      l10n,
-      enableScripting,
-      hasJSActionsPromise,
-      fieldObjectsPromise,
-      annotationCanvasMap,
-      accessibilityManager,
-    });
-  }
-
-  /**
-   * @typedef {Object} CreateAnnotationEditorLayerBuilderParameters
-   * @property {AnnotationEditorUIManager} [uiManager]
-   * @property {HTMLDivElement} pageDiv
-   * @property {PDFPageProxy} pdfPage
-   * @property {IL10n} l10n
-   * @property {TextAccessibilityManager} [accessibilityManager]
-   */
-
-  /**
-   * @param {CreateAnnotationEditorLayerBuilderParameters}
-   * @returns {AnnotationEditorLayerBuilder}
-   */
-  createAnnotationEditorLayerBuilder({
-    uiManager = this.#annotationEditorUIManager,
-    pageDiv,
-    pdfPage,
-    accessibilityManager = null,
-    l10n,
-  }) {
-    return new AnnotationEditorLayerBuilder({
-      uiManager,
-      pageDiv,
-      pdfPage,
-      accessibilityManager,
-      l10n,
-    });
-  }
-
-  /**
-   * @typedef {Object} CreateXfaLayerBuilderParameters
-   * @property {HTMLDivElement} pageDiv
-   * @property {PDFPageProxy} pdfPage
-   * @property {AnnotationStorage} [annotationStorage] - Storage for annotation
-   *   data in forms.
-   */
-
-  /**
-   * @param {CreateXfaLayerBuilderParameters}
-   * @returns {XfaLayerBuilder}
-   */
-  createXfaLayerBuilder({
-    pageDiv,
-    pdfPage,
-    annotationStorage = this.pdfDocument?.annotationStorage,
-  }) {
-    return new XfaLayerBuilder({
-      pageDiv,
-      pdfPage,
-      annotationStorage,
-      linkService: this.linkService,
-    });
-  }
-
-  /**
-   * @returns {StructTreeLayerBuilder}
-   */
-  createStructTreeLayerBuilder() {
-    return new StructTreeLayerBuilder();
   }
 
   /**
@@ -1881,11 +1717,7 @@ class PDFViewer {
     }
     this._optionalContentConfigPromise = promise;
 
-    const updateArgs = { optionalContentConfigPromise: promise };
-    for (const pageView of this._pages) {
-      pageView.update(updateArgs);
-    }
-    this.update();
+    this.refresh(false, { optionalContentConfigPromise: promise });
 
     this.eventBus.dispatch("optionalcontentconfigchanged", {
       source: this,
@@ -1948,7 +1780,7 @@ class PDFViewer {
     // Call this before re-scrolling to the current page, to ensure that any
     // changes in scale don't move the current page.
     if (this._currentScaleValue && isNaN(this._currentScaleValue)) {
-      this._setScale(this._currentScaleValue, true);
+      this._setScale(this._currentScaleValue, { noScroll: true });
     }
     this._setCurrentPageNumber(pageNumber, /* resetCurrentPageView = */ true);
     this.update();
@@ -2020,7 +1852,7 @@ class PDFViewer {
     // Call this before re-scrolling to the current page, to ensure that any
     // changes in scale don't move the current page.
     if (this._currentScaleValue && isNaN(this._currentScaleValue)) {
-      this._setScale(this._currentScaleValue, true);
+      this._setScale(this._currentScaleValue, { noScroll: true });
     }
     this._setCurrentPageNumber(pageNumber, /* resetCurrentPageView = */ true);
     this.update();
@@ -2160,40 +1992,108 @@ class PDFViewer {
 
   /**
    * Increase the current zoom level one, or more, times.
-   * @param {number} [steps] - Defaults to zooming once.
+   * @param {Object|null} [options]
    */
-  increaseScale(steps = 1) {
+  increaseScale(options = null) {
+    if (
+      (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) &&
+      typeof options === "number"
+    ) {
+      console.error(
+        "The `increaseScale` method-signature was updated, please use an object instead."
+      );
+      options = { steps: options };
+    }
+
+    if (!this.pdfDocument) {
+      return;
+    }
+
+    options ||= Object.create(null);
+
     let newScale = this._currentScale;
-    do {
-      newScale = (newScale * DEFAULT_SCALE_DELTA).toFixed(2);
-      newScale = Math.ceil(newScale * 10) / 10;
-      newScale = Math.min(MAX_SCALE, newScale);
-    } while (--steps > 0 && newScale < MAX_SCALE);
-    this.currentScaleValue = newScale;
+    if (options.scaleFactor > 1) {
+      newScale = Math.min(
+        MAX_SCALE,
+        Math.round(newScale * options.scaleFactor * 100) / 100
+      );
+    } else {
+      let steps = options.steps ?? 1;
+      do {
+        newScale = (newScale * DEFAULT_SCALE_DELTA).toFixed(2);
+        newScale = Math.ceil(newScale * 10) / 10;
+        newScale = Math.min(MAX_SCALE, newScale);
+      } while (--steps > 0 && newScale < MAX_SCALE);
+    }
+
+    options.noScroll = false;
+    this._setScale(newScale, options);
   }
 
   /**
    * Decrease the current zoom level one, or more, times.
-   * @param {number} [steps] - Defaults to zooming once.
+   * @param {Object|null} [options]
    */
-  decreaseScale(steps = 1) {
+  decreaseScale(options = null) {
+    if (
+      (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) &&
+      typeof options === "number"
+    ) {
+      console.error(
+        "The `decreaseScale` method-signature was updated, please use an object instead."
+      );
+      options = { steps: options };
+    }
+
+    if (!this.pdfDocument) {
+      return;
+    }
+
+    options ||= Object.create(null);
+
     let newScale = this._currentScale;
-    do {
-      newScale = (newScale / DEFAULT_SCALE_DELTA).toFixed(2);
-      newScale = Math.floor(newScale * 10) / 10;
-      newScale = Math.max(MIN_SCALE, newScale);
-    } while (--steps > 0 && newScale > MIN_SCALE);
-    this.currentScaleValue = newScale;
+    if (options.scaleFactor > 0 && options.scaleFactor < 1) {
+      newScale = Math.max(
+        MIN_SCALE,
+        Math.round(newScale * options.scaleFactor * 100) / 100
+      );
+    } else {
+      let steps = options.steps ?? 1;
+      do {
+        newScale = (newScale / DEFAULT_SCALE_DELTA).toFixed(2);
+        newScale = Math.floor(newScale * 10) / 10;
+        newScale = Math.max(MIN_SCALE, newScale);
+      } while (--steps > 0 && newScale > MIN_SCALE);
+    }
+
+    options.noScroll = false;
+    this._setScale(newScale, options);
   }
 
-  updateContainerHeightCss() {
-    const height = this.container.clientHeight;
-
+  #updateContainerHeightCss(height = this.container.clientHeight) {
     if (height !== this.#previousContainerHeight) {
       this.#previousContainerHeight = height;
-
       docStyle.setProperty("--viewer-container-height", `${height}px`);
     }
+  }
+
+  #resizeObserverCallback(entries) {
+    for (const entry of entries) {
+      if (entry.target === this.container) {
+        this.#updateContainerHeightCss(
+          Math.floor(entry.borderBoxSize[0].blockSize)
+        );
+        this.#containerTopLeft = null;
+        break;
+      }
+    }
+  }
+
+  get containerTopLeft() {
+    return (this.#containerTopLeft ||= [
+      this.container.offsetTop,
+      this.container.offsetLeft,
+    ]);
   }
 
   /**
@@ -2238,15 +2138,20 @@ class PDFViewer {
     this.#annotationEditorUIManager.updateParams(type, value);
   }
 
-  refresh() {
+  refresh(noUpdate = false, updateArgs = Object.create(null)) {
     if (!this.pdfDocument) {
       return;
     }
-    const updateArgs = {};
     for (const pageView of this._pages) {
       pageView.update(updateArgs);
     }
-    this.update();
+    if (this.#scaleTimeoutId !== null) {
+      clearTimeout(this.#scaleTimeoutId);
+      this.#scaleTimeoutId = null;
+    }
+    if (!noUpdate) {
+      this.update();
+    }
   }
 }
 

@@ -986,7 +986,6 @@ function buildComponents(defines, dir) {
   const COMPONENTS_IMAGES = [
     "web/images/annotation-*.svg",
     "web/images/loading-icon.gif",
-    "web/images/shadow.png",
   ];
 
   return merge([
@@ -2206,7 +2205,7 @@ function packageJson() {
     bugs: DIST_BUGS_URL,
     license: DIST_LICENSE,
     optionalDependencies: {
-      canvas: "^2.10.2",
+      canvas: "^2.11.0",
     },
     dependencies: {
       "web-streams-polyfill": "^3.2.1",
