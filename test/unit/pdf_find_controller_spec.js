@@ -21,10 +21,8 @@ import { isNodeJS } from "../../src/shared/is_node.js";
 import { SimpleLinkService } from "../../web/pdf_link_service.js";
 
 const tracemonkeyFileName = "tracemonkey.pdf";
-const CMAP_PARAMS = {
-  cMapUrl: isNodeJS ? "./external/bcmaps/" : "../../../external/bcmaps/",
-  cMapPacked: true,
-};
+
+const CMAP_URL = isNodeJS ? "./external/bcmaps/" : "../../../external/bcmaps/";
 
 class MockLinkService extends SimpleLinkService {
   constructor() {
@@ -57,7 +55,7 @@ async function initPdfFindController(
 ) {
   const loadingTask = getDocument(
     buildGetDocumentParams(filename || tracemonkeyFileName, {
-      ...CMAP_PARAMS,
+      cMapUrl: CMAP_URL,
     })
   );
   const pdfDocument = await loadingTask.promise;
@@ -85,7 +83,8 @@ function testSearch({
   selectedMatch,
   pageMatches = null,
   pageMatchesLength = null,
-  countUpdate = null,
+  updateFindMatchesCount = null,
+  updateFindControlState = null,
 }) {
   return new Promise(function (resolve) {
     const eventState = Object.assign(
@@ -127,11 +126,20 @@ function testSearch({
       return a + b;
     });
 
+    if (updateFindControlState) {
+      eventBus.on(
+        "updatefindcontrolstate",
+        function onUpdateFindControlState(evt) {
+          updateFindControlState[0] += 1;
+        }
+      );
+    }
+
     eventBus.on(
       "updatefindmatchescount",
       function onUpdateFindMatchesCount(evt) {
-        if (countUpdate) {
-          countUpdate[0] += 1;
+        if (updateFindMatchesCount) {
+          updateFindMatchesCount[0] += 1;
         }
         if (pdfFindController.pageMatches.length !== totalPages) {
           return;
@@ -199,7 +207,7 @@ function testEmptySearch({ eventBus, pdfFindController, state }) {
 describe("pdf_find_controller", function () {
   it("performs a normal search", async function () {
     const { eventBus, pdfFindController } = await initPdfFindController();
-    const countUpdate = [0];
+    const updateFindMatchesCount = [0];
 
     await testSearch({
       eventBus,
@@ -212,10 +220,10 @@ describe("pdf_find_controller", function () {
         pageIndex: 0,
         matchIndex: 0,
       },
-      countUpdate,
+      updateFindMatchesCount,
     });
 
-    expect(countUpdate[0]).toBe(9);
+    expect(updateFindMatchesCount[0]).toBe(9);
   });
 
   it("performs a normal search but the total counts is only updated one time", async function () {
@@ -223,7 +231,8 @@ describe("pdf_find_controller", function () {
       null,
       false
     );
-    const countUpdate = [0];
+    const updateFindMatchesCount = [0];
+    const updateFindControlState = [0];
 
     await testSearch({
       eventBus,
@@ -236,10 +245,12 @@ describe("pdf_find_controller", function () {
         pageIndex: 0,
         matchIndex: 0,
       },
-      countUpdate,
+      updateFindMatchesCount,
+      updateFindControlState,
     });
 
-    expect(countUpdate[0]).toBe(1);
+    expect(updateFindMatchesCount[0]).toBe(1);
+    expect(updateFindControlState[0]).toBe(0);
   });
 
   it("performs a normal search and finds the previous result", async function () {
@@ -766,6 +777,44 @@ describe("pdf_find_controller", function () {
       pdfFindController,
       state: {
         query: "\u064E",
+      },
+    });
+  });
+
+  it("performs a search in a text containing combining diacritics", async function () {
+    if (isNodeJS) {
+      pending("Linked test-cases are not supported in Node.js.");
+    }
+
+    const { eventBus, pdfFindController } = await initPdfFindController(
+      "issue12909.pdf"
+    );
+
+    await testSearch({
+      eventBus,
+      pdfFindController,
+      state: {
+        query: "הספר",
+        matchDiacritics: true,
+      },
+      matchesPerPage: [0, 0, 0, 0, 0, 0, 0, 0, 1],
+      selectedMatch: {
+        pageIndex: 8,
+        matchIndex: 0,
+      },
+    });
+
+    await testSearch({
+      eventBus,
+      pdfFindController,
+      state: {
+        query: "הספר",
+        matchDiacritics: false,
+      },
+      matchesPerPage: [0, 1, 0, 0, 0, 0, 0, 0, 1],
+      selectedMatch: {
+        pageIndex: 8,
+        matchIndex: 0,
       },
     });
   });

@@ -785,6 +785,13 @@
        "rounds": 1,
        "type": "eq"
     },
+    {  "id": "checkbox-bad-appearance",
+       "file": "pdfs/checkbox-bad-appearance.pdf",
+       "md5": "acdac655911cb3d33c3fb1462cf2ad56",
+       "rounds": 1,
+       "type": "eq",
+       "forms": true
+    },
     {  "id": "artofwar",
        "file": "pdfs/artofwar.pdf",
        "md5": "7bdd51c327b74f1f7abdd90eedb2f912",
@@ -998,6 +1005,12 @@
        "rounds": 1,
        "lastPage": 1,
        "type": "eq"
+    },
+    {  "id": "bug1811668",
+       "file": "pdfs/bug1811668_reduced.pdf",
+       "md5": "87aa65d89aa0682cbe7b87152b884495",
+       "rounds": 1,
+       "type": "text"
     },
     {  "id": "issue8092",
        "file": "pdfs/issue8092.pdf",
@@ -1995,6 +2008,14 @@
        "rounds": 1,
        "type": "eq"
     },
+    {  "id": "issue15942",
+       "file": "pdfs/issue15942.pdf",
+       "md5": "d690e16e6a3a8486ebf7289a9c43ba39",
+       "rounds": 1,
+       "link": true,
+       "lastPage": 1,
+       "type": "eq"
+    },
     {  "id": "bug1046314",
        "file": "pdfs/bug1046314.pdf",
        "md5": "fc658439f44cd2dd27c8bee7e7a8344e",
@@ -2211,6 +2232,12 @@
        "file": "pdfs/issue6621.pdf",
        "md5": "8079ce514fb2cdded4251eade6380ba9",
        "link": false,
+       "rounds": 1,
+       "type": "eq"
+    },
+    {  "id": "issue15977",
+       "file": "pdfs/issue15977_reduced.pdf",
+       "md5": "cd06accb3da81597ad11acffeb0b68fc",
        "rounds": 1,
        "type": "eq"
     },
@@ -3048,6 +3075,12 @@
        "lastPage": 1,
        "link": true,
        "type": "eq"
+    },
+    {  "id": "issue15910",
+       "file": "pdfs/issue15910.pdf",
+       "md5": "6429d8490e11e226b1cbdf2033c04237",
+       "rounds": 1,
+       "type": "text"
     },
     {  "id": "issue7872",
        "file": "pdfs/issue7872.pdf",
@@ -7299,5 +7332,37 @@
       "rounds": 1,
       "link": true,
       "type": "eq"
+   },
+   {
+      "id": "bug1815476-save-print",
+      "file": "pdfs/bug1815476.pdf",
+      "md5": "476f77da5f9422ef86ea5f4531602e93",
+      "rounds": 1,
+      "type": "eq",
+      "save": true,
+      "print": true,
+      "annotationStorage": {
+         "88R": {
+            "value": "foo"
+         },
+         "87R": {
+            "value": "bar"
+         }
+      }
+   },
+   {
+      "id": "issue16021",
+      "file": "pdfs/issue16021.pdf",
+      "md5": "78a12254cac90ba5219a4c5555ea35ed",
+      "rounds": 1,
+      "type": "eq"
+   },
+   {
+      "id": "bug1770750-annotations",
+      "file": "pdfs/bug1770750.pdf",
+      "md5": "01e6d77eac90b4b08d75240d3db2b826",
+      "rounds": 1,
+      "type": "eq",
+      "annotations": true
    }
 ]

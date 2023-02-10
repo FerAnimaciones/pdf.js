@@ -36,7 +36,6 @@ import {
 import {
   approximateFraction,
   DEFAULT_SCALE,
-  docStyle,
   OutputScale,
   RendererType,
   RenderingStates,
@@ -47,6 +46,7 @@ import { AnnotationEditorLayerBuilder } from "./annotation_editor_layer_builder.
 import { AnnotationLayerBuilder } from "./annotation_layer_builder.js";
 import { compatibilityParams } from "./app_options.js";
 import { NullL10n } from "./l10n_utils.js";
+import { SimpleLinkService } from "./pdf_link_service.js";
 import { StructTreeLayerBuilder } from "./struct_tree_layer_builder.js";
 import { TextAccessibilityManager } from "./text_accessibility.js";
 import { TextHighlighter } from "./text_highlighter.js";
@@ -104,7 +104,6 @@ const DEFAULT_LAYER_PROPERTIES = () => {
     findController: null,
     hasJSActionsPromise: null,
     get linkService() {
-      const { SimpleLinkService } = require("./pdf_link_service.js");
       return new SimpleLinkService();
     },
   };
@@ -117,6 +116,8 @@ class PDFPageView {
   #annotationMode = AnnotationMode.ENABLE_FORMS;
 
   #layerProperties = null;
+
+  #loadingId = null;
 
   #previousRotation = null;
 
@@ -206,7 +207,7 @@ class PDFPageView {
     ) {
       // Ensure that the various layers always get the correct initial size,
       // see issue 15795.
-      docStyle.setProperty(
+      container?.style.setProperty(
         "--scale-factor",
         this.scale * PixelsPerInch.PDF_TO_CSS_UNITS
       );
@@ -233,21 +234,34 @@ class PDFPageView {
   }
 
   set renderingState(state) {
+    if (state === this.#renderingState) {
+      return;
+    }
     this.#renderingState = state;
 
+    if (this.#loadingId) {
+      clearTimeout(this.#loadingId);
+      this.#loadingId = null;
+    }
+
     switch (state) {
-      case RenderingStates.INITIAL:
       case RenderingStates.PAUSED:
-        this.loadingIconDiv?.classList.add("notVisible");
+        this.div.classList.remove("loading");
         break;
       case RenderingStates.RUNNING:
-        this.loadingIconDiv?.classList.remove("notVisible");
+        this.div.classList.add("loadingIcon");
+        this.#loadingId = setTimeout(() => {
+          // Adding the loading class is slightly postponed in order to not have
+          // it with loadingIcon.
+          // If we don't do that the visibility of the background is changed but
+          // the transition isn't triggered.
+          this.div.classList.add("loading");
+          this.#loadingId = null;
+        }, 0);
         break;
+      case RenderingStates.INITIAL:
       case RenderingStates.FINISHED:
-        if (this.loadingIconDiv) {
-          this.loadingIconDiv.remove();
-          delete this.loadingIconDiv;
-        }
+        this.div.classList.remove("loadingIcon", "loading");
         break;
     }
   }
@@ -403,6 +417,7 @@ class PDFPageView {
     if (treeDom) {
       this.canvas?.append(treeDom);
     }
+    this.structTreeLayer?.show();
   }
 
   async #buildXfaTextContentItems(textDivs) {
@@ -469,7 +484,6 @@ class PDFPageView {
         case annotationEditorLayerNode:
         case xfaLayerNode:
         case textLayerNode:
-        case this.loadingIconDiv:
           continue;
       }
       node.remove();
@@ -492,6 +506,7 @@ class PDFPageView {
     if (textLayerNode) {
       this.textLayer.hide();
     }
+    this.structTreeLayer?.hide();
 
     if (!zoomLayerNode) {
       if (this.canvas) {
@@ -511,16 +526,6 @@ class PDFPageView {
     ) {
       this.paintedViewportMap.delete(this.svg);
       delete this.svg;
-    }
-
-    if (!this.loadingIconDiv) {
-      this.loadingIconDiv = document.createElement("div");
-      this.loadingIconDiv.className = "loadingIcon notVisible";
-      this.loadingIconDiv.setAttribute("role", "img");
-      this.l10n.get("loading").then(msg => {
-        this.loadingIconDiv?.setAttribute("aria-label", msg);
-      });
-      div.append(this.loadingIconDiv);
     }
   }
 
@@ -562,7 +567,10 @@ class PDFPageView {
         PDFJSDev.test("!PRODUCTION || GENERIC")) &&
       this._isStandalone
     ) {
-      docStyle.setProperty("--scale-factor", this.viewport.scale);
+      this.div.parentNode?.style.setProperty(
+        "--scale-factor",
+        this.viewport.scale
+      );
     }
 
     if (
@@ -770,6 +778,7 @@ class PDFPageView {
     if (this.textLayer) {
       if (hideTextLayer) {
         this.textLayer.hide();
+        this.structTreeLayer?.hide();
       } else if (redrawTextLayer) {
         this.#renderTextLayer();
       }
@@ -1071,7 +1080,12 @@ class PDFPageView {
         renderCapability.resolve();
       },
       function (error) {
-        showCanvas();
+        // When zooming with a `drawingDelay` set, avoid temporarily showing
+        // a black canvas if rendering was cancelled before the `onContinue`-
+        // callback had been invoked at least once.
+        if (!(error instanceof RenderingCancelledException)) {
+          showCanvas();
+        }
         renderCapability.reject(error);
       }
     );

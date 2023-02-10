@@ -21,6 +21,7 @@
 !issue14881.pdf
 !issue3214.pdf
 !issue4665.pdf
+!checkbox-bad-appearance.pdf
 !issue4684.pdf
 !issue8092.pdf
 !issue5256.pdf
@@ -241,6 +242,7 @@
 !bug1108301.pdf
 !issue10301.pdf
 !bug1157493.pdf
+!issue15910.pdf
 !issue4260_reduced.pdf
 !bug1250079.pdf
 !bug1473809.pdf
@@ -269,6 +271,7 @@
 !issue4379.pdf
 !issue4550.pdf
 !issue13316_reduced.pdf
+!issue15977_reduced.pdf
 !issue4575.pdf
 !bug1011159.pdf
 !issue5734.pdf
@@ -397,6 +400,7 @@
 !issue4461.pdf
 !issue4573.pdf
 !issue4722.pdf
+!bug1811668_reduced.pdf
 !issue4800.pdf
 !issue9243.pdf
 !issue13147.pdf
@@ -565,3 +569,8 @@
 !issue15815.pdf
 !issue15818.pdf
 !autoprint.pdf
+!bug1811694.pdf
+!bug1811510.pdf
+!bug1815476.pdf
+!issue16021.pdf
+!bug1770750.pdf
