@@ -26,6 +26,8 @@ if (
 const IDENTITY_MATRIX = [1, 0, 0, 1, 0, 0];
 const FONT_IDENTITY_MATRIX = [0.001, 0, 0, 0.001, 0, 0];
 
+const MAX_IMAGE_SIZE_TO_CACHE = 10e6; // Ten megabytes.
+
 // Represent the percentage of the height of a single-line field over
 // the font size. Acrobat seems to use this value.
 const LINE_FACTOR = 1.35;
@@ -346,32 +348,6 @@ const OPS = {
   constructPath: 91,
 };
 
-const UNSUPPORTED_FEATURES =
-  typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")
-    ? {
-        forms: "forms",
-        javaScript: "javaScript",
-        signatures: "signatures",
-        smask: "smask",
-        shadingPattern: "shadingPattern",
-        errorTilingPattern: "errorTilingPattern",
-        errorExtGState: "errorExtGState",
-        errorXObject: "errorXObject",
-        errorFontLoadType3: "errorFontLoadType3",
-        errorFontState: "errorFontState",
-        errorFontMissing: "errorFontMissing",
-        errorFontTranslate: "errorFontTranslate",
-        errorColorSpace: "errorColorSpace",
-        errorOperatorList: "errorOperatorList",
-        errorFontToUnicode: "errorFontToUnicode",
-        errorFontLoadNative: "errorFontLoadNative",
-        errorFontBuildPath: "errorFontBuildPath",
-        errorFontGetPath: "errorFontGetPath",
-        errorMarkedContent: "errorMarkedContent",
-        errorContentSubStream: "errorContentSubStream",
-      }
-    : null;
-
 const PasswordResponses = {
   NEED_PASSWORD: 1,
   INCORRECT_PASSWORD: 2,
@@ -595,56 +571,6 @@ function stringToBytes(str) {
     bytes[i] = str.charCodeAt(i) & 0xff;
   }
   return bytes;
-}
-
-/**
- * Gets length of the array (Array, Uint8Array, or string) in bytes.
- * @param {Array<any>|Uint8Array|string} arr
- * @returns {number}
- */
-// eslint-disable-next-line consistent-return
-function arrayByteLength(arr) {
-  if (arr.length !== undefined) {
-    return arr.length;
-  }
-  if (arr.byteLength !== undefined) {
-    return arr.byteLength;
-  }
-  unreachable("Invalid argument for arrayByteLength");
-}
-
-/**
- * Combines array items (arrays) into single Uint8Array object.
- * @param {Array<Array<any>|Uint8Array|string>} arr - the array of the arrays
- *   (Array, Uint8Array, or string).
- * @returns {Uint8Array}
- */
-function arraysToBytes(arr) {
-  const length = arr.length;
-  // Shortcut: if first and only item is Uint8Array, return it.
-  if (length === 1 && arr[0] instanceof Uint8Array) {
-    return arr[0];
-  }
-  let resultLength = 0;
-  for (let i = 0; i < length; i++) {
-    resultLength += arrayByteLength(arr[i]);
-  }
-  let pos = 0;
-  const data = new Uint8Array(resultLength);
-  for (let i = 0; i < length; i++) {
-    let item = arr[i];
-    if (!(item instanceof Uint8Array)) {
-      if (typeof item === "string") {
-        item = stringToBytes(item);
-      } else {
-        item = new Uint8Array(item);
-      }
-    }
-    const itemLength = item.byteLength;
-    data.set(item, pos);
-    pos += itemLength;
-  }
-  return data;
 }
 
 function string32(value) {
@@ -1115,7 +1041,6 @@ export {
   AnnotationReviewState,
   AnnotationStateModelType,
   AnnotationType,
-  arraysToBytes,
   assert,
   BaseException,
   BASELINE_FACTOR,
@@ -1137,6 +1062,7 @@ export {
   isArrayEqual,
   LINE_DESCENT_FACTOR,
   LINE_FACTOR,
+  MAX_IMAGE_SIZE_TO_CACHE,
   MissingPDFException,
   objectFromMap,
   objectSize,
@@ -1156,7 +1082,6 @@ export {
   UnexpectedResponseException,
   UnknownErrorException,
   unreachable,
-  UNSUPPORTED_FEATURES,
   utf8StringToString,
   Util,
   VerbosityLevel,

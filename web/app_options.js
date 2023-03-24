@@ -284,8 +284,11 @@ const defaultOptions = {
   workerSrc: {
     /** @type {string} */
     value:
+      // eslint-disable-next-line no-nested-ternary
       typeof PDFJSDev === "undefined" || !PDFJSDev.test("PRODUCTION")
         ? "../src/worker_loader.js"
+        : PDFJSDev.test("MOZCENTRAL")
+        ? "resource://pdf.js/build/pdf.worker.js"
         : "../build/pdf.worker.js",
     kind: OptionKind.WORKER,
   },
@@ -404,13 +407,12 @@ class AppOptions {
   static remove(name) {
     delete userOptions[name];
   }
+}
 
-  /**
-   * @ignore
-   */
-  static _hasUserOptions() {
+if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
+  AppOptions._hasUserOptions = function () {
     return Object.keys(userOptions).length > 0;
-  }
+  };
 }
 
 export { AppOptions, compatibilityParams, OptionKind };

@@ -818,4 +818,86 @@ describe("pdf_find_controller", function () {
       },
     });
   });
+
+  it("performs a search in a text with some Hiragana diacritics at the end of a line", async function () {
+    const { eventBus, pdfFindController } = await initPdfFindController(
+      "issue16063.pdf"
+    );
+
+    await testSearch({
+      eventBus,
+      pdfFindController,
+      state: {
+        query: "行うことができる速結端子",
+      },
+      matchesPerPage: [1],
+      selectedMatch: {
+        pageIndex: 0,
+        matchIndex: 0,
+      },
+      pageMatches: [[63]],
+      pageMatchesLength: [[12]],
+    });
+
+    await testSearch({
+      eventBus,
+      pdfFindController,
+      state: {
+        query: "デュプレックス",
+      },
+      matchesPerPage: [1],
+      selectedMatch: {
+        pageIndex: 0,
+        matchIndex: 0,
+      },
+      pageMatches: [[205]],
+      pageMatchesLength: [[7]],
+    });
+  });
+
+  it("performs a search in a text with some UTF-32 chars", async function () {
+    if (isNodeJS) {
+      pending("Linked test-cases are not supported in Node.js.");
+    }
+
+    const { eventBus, pdfFindController } = await initPdfFindController(
+      "bug1820909.pdf"
+    );
+
+    await testSearch({
+      eventBus,
+      pdfFindController,
+      state: {
+        query: "31350",
+      },
+      matchesPerPage: [1, 2],
+      selectedMatch: {
+        pageIndex: 0,
+        matchIndex: 0,
+      },
+      pageMatches: [[41], [131, 1359]],
+      pageMatchesLength: [[5], [5, 5]],
+    });
+  });
+
+  it("performs a search in a text with some UTF-32 chars followed by a dash at the end of a line", async function () {
+    const { eventBus, pdfFindController } = await initPdfFindController(
+      "bug1820909.1.pdf"
+    );
+
+    await testSearch({
+      eventBus,
+      pdfFindController,
+      state: {
+        query: "abcde",
+      },
+      matchesPerPage: [2],
+      selectedMatch: {
+        pageIndex: 0,
+        matchIndex: 0,
+      },
+      pageMatches: [[42, 95]],
+      pageMatchesLength: [[5, 5]],
+    });
+  });
 });

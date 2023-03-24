@@ -81,6 +81,44 @@ class XRefParseException extends BaseException {
 }
 
 /**
+ * Combines multiple ArrayBuffers into a single Uint8Array.
+ * @param {Array<ArrayBuffer>} arr - An array of ArrayBuffers.
+ * @returns {Uint8Array}
+ */
+function arrayBuffersToBytes(arr) {
+  if (
+    typeof PDFJSDev === "undefined" ||
+    PDFJSDev.test("!PRODUCTION || TESTING")
+  ) {
+    for (const item of arr) {
+      assert(
+        item instanceof ArrayBuffer,
+        "arrayBuffersToBytes - expected an ArrayBuffer."
+      );
+    }
+  }
+  const length = arr.length;
+  if (length === 0) {
+    return new Uint8Array(0);
+  }
+  if (length === 1) {
+    return new Uint8Array(arr[0]);
+  }
+  let dataLength = 0;
+  for (let i = 0; i < length; i++) {
+    dataLength += arr[i].byteLength;
+  }
+  const data = new Uint8Array(dataLength);
+  let pos = 0;
+  for (let i = 0; i < length; i++) {
+    const item = new Uint8Array(arr[i]);
+    data.set(item, pos);
+    pos += item.byteLength;
+  }
+  return data;
+}
+
+/**
  * Get the value of an inheritable property.
  *
  * If the PDF specification explicitly lists a property in a dictionary as
@@ -265,7 +303,7 @@ function escapePDFName(str) {
 // Replace "(", ")", "\n", "\r" and "\" by "\(", "\)", "\\n", "\\r" and "\\"
 // in order to write it in a PDF file.
 function escapeString(str) {
-  return str.replace(/([()\\\n\r])/g, match => {
+  return str.replaceAll(/([()\\\n\r])/g, match => {
     if (match === "\n") {
       return "\\n";
     } else if (match === "\r") {
@@ -303,7 +341,7 @@ function _collectJS(entry, xref, list, parents) {
       } else if (typeof js === "string") {
         code = js;
       }
-      code = code && stringToPDFString(code).replace(/\u0000/g, "");
+      code = code && stringToPDFString(code).replaceAll("\x00", "");
       if (code) {
         list.push(code);
       }
@@ -433,12 +471,12 @@ function validateCSSFont(cssFontInfo) {
 
   // See https://developer.mozilla.org/en-US/docs/Web/CSS/string.
   if (/^".*"$/.test(fontFamily)) {
-    if (/[^\\]"/.test(fontFamily.slice(1, fontFamily.length - 1))) {
+    if (/[^\\]"/.test(fontFamily.slice(1, -1))) {
       warn(`XFA - FontFamily contains some unescaped ": ${fontFamily}.`);
       return false;
     }
   } else if (/^'.*'$/.test(fontFamily)) {
-    if (/[^\\]'/.test(fontFamily.slice(1, fontFamily.length - 1))) {
+    if (/[^\\]'/.test(fontFamily.slice(1, -1))) {
       warn(`XFA - FontFamily contains some unescaped ': ${fontFamily}.`);
       return false;
     }
@@ -579,6 +617,7 @@ function getRotationMatrix(rotation, width, height) {
 }
 
 export {
+  arrayBuffersToBytes,
   collectActions,
   encodeToXmlString,
   escapePDFName,

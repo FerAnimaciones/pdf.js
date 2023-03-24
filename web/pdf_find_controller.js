@@ -136,7 +136,8 @@ function normalize(text) {
     // 3040-309F: Hiragana
     // 30A0-30FF: Katakana
     const CJK = "(?:\\p{Ideographic}|[\u3040-\u30FF])";
-    const regexp = `([${replace}])|([${toNormalizeWithNFKC}])|(\\p{M}+(?:-\\n)?)|(\\S-\\n)|(${CJK}\\n)|(\\n)`;
+    const HKDiacritics = "(?:\u3099|\u309A)";
+    const regexp = `([${replace}])|([${toNormalizeWithNFKC}])|(${HKDiacritics}\\n)|(\\p{M}+(?:-\\n)?)|(\\S-\\n)|(${CJK}\\n)|(\\n)`;
 
     if (syllablePositions.length === 0) {
       // Most of the syllables belong to Hangul so there are no need
@@ -198,7 +199,7 @@ function normalize(text) {
 
   normalized = normalized.replace(
     normalizationRegex,
-    (match, p1, p2, p3, p4, p5, p6, p7, i) => {
+    (match, p1, p2, p3, p4, p5, p6, p7, p8, i) => {
       i -= shiftOrigin;
       if (p1) {
         // Maybe fractions or quotations mark...
@@ -227,8 +228,32 @@ function normalize(text) {
       }
 
       if (p3) {
-        const hasTrailingDashEOL = p3.endsWith("\n");
-        const len = hasTrailingDashEOL ? p3.length - 2 : p3.length;
+        // We've a Katakana-Hiragana diacritic followed by a \n so don't replace
+        // the \n by a whitespace.
+        hasDiacritics = true;
+
+        // Diacritic.
+        if (i + eol === rawDiacriticsPositions[rawDiacriticsIndex]?.[1]) {
+          ++rawDiacriticsIndex;
+        } else {
+          // i is the position of the first diacritic
+          // so (i - 1) is the position for the letter before.
+          positions.push([i - 1 - shift + 1, shift - 1]);
+          shift -= 1;
+          shiftOrigin += 1;
+        }
+
+        // End-of-line.
+        positions.push([i - shift + 1, shift]);
+        shiftOrigin += 1;
+        eol += 1;
+
+        return p3.charAt(0);
+      }
+
+      if (p4) {
+        const hasTrailingDashEOL = p4.endsWith("\n");
+        const len = hasTrailingDashEOL ? p4.length - 2 : p4.length;
 
         // Diacritics.
         hasDiacritics = true;
@@ -248,40 +273,45 @@ function normalize(text) {
 
         if (hasTrailingDashEOL) {
           // Diacritics are followed by a -\n.
-          // See comments in `if (p4)` block.
+          // See comments in `if (p5)` block.
           i += len - 1;
           positions.push([i - shift + 1, 1 + shift]);
           shift += 1;
           shiftOrigin += 1;
           eol += 1;
-          return p3.slice(0, len);
+          return p4.slice(0, len);
         }
 
-        return p3;
-      }
-
-      if (p4) {
-        // "X-\n" is removed because an hyphen at the end of a line
-        // with not a space before is likely here to mark a break
-        // in a word.
-        // The \n isn't in the original text so here y = i, n = 1 and o = 2.
-        positions.push([i - shift + 1, 1 + shift]);
-        shift += 1;
-        shiftOrigin += 1;
-        eol += 1;
-        return p4.charAt(0);
+        return p4;
       }
 
       if (p5) {
-        // An ideographic at the end of a line doesn't imply adding an extra
-        // white space.
-        positions.push([i - shift + 1, shift]);
+        // "X-\n" is removed because an hyphen at the end of a line
+        // with not a space before is likely here to mark a break
+        // in a word.
+        // If X is encoded with UTF-32 then it can have a length greater than 1.
+        // The \n isn't in the original text so here y = i, n = X.len - 2 and
+        // o = X.len - 1.
+        const len = p5.length - 2;
+        positions.push([i - shift + len, 1 + shift]);
+        shift += 1;
         shiftOrigin += 1;
         eol += 1;
-        return p5.charAt(0);
+        return p5.slice(0, -2);
       }
 
       if (p6) {
+        // An ideographic at the end of a line doesn't imply adding an extra
+        // white space.
+        // A CJK can be encoded in UTF-32, hence their length isn't always 1.
+        const len = p6.length - 1;
+        positions.push([i - shift + len, shift]);
+        shiftOrigin += 1;
+        eol += 1;
+        return p6.slice(0, -1);
+      }
+
+      if (p7) {
         // eol is replaced by space: "foo\nbar" is likely equivalent to
         // "foo bar".
         positions.push([i - shift + 1, shift - 1]);
@@ -291,7 +321,7 @@ function normalize(text) {
         return " ";
       }
 
-      // p7
+      // p8
       if (i + eol === syllablePositions[syllableIndex]?.[1]) {
         // A syllable (1 char) is replaced with several chars (n) so
         // newCharsLen = n - 1.
@@ -303,7 +333,7 @@ function normalize(text) {
         shift -= newCharLen;
         shiftOrigin += newCharLen;
       }
-      return p7;
+      return p8;
     }
   );
 
@@ -339,7 +369,7 @@ function getOriginalIndex(diffs, pos, len) {
  * @typedef {Object} PDFFindControllerOptions
  * @property {IPDFLinkService} linkService - The navigation/linking service.
  * @property {EventBus} eventBus - The application event bus.
- * @property {boolean} updateMatchesCountOnProgress - True if the matches
+ * @property {boolean} [updateMatchesCountOnProgress] - True if the matches
  *   count must be updated on progress or only when the last page is reached.
  *   The default value is `true`.
  */
@@ -633,7 +663,7 @@ class PDFFindController {
   #convertToRegExpString(query, hasDiacritics) {
     const { matchDiacritics } = this._state;
     let isUnicode = false;
-    query = query.replace(
+    query = query.replaceAll(
       SPECIAL_CHARS_REG_EXP,
       (
         match,

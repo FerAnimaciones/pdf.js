@@ -149,6 +149,10 @@ class DefaultExternalServices {
   static updateEditorStates(data) {
     throw new Error("Not implemented: updateEditorStates");
   }
+
+  static get canvasMaxAreaInBytes() {
+    return shadow(this, "canvasMaxAreaInBytes", -1);
+  }
 }
 
 const PDFViewerApplication = {
@@ -233,8 +237,7 @@ const PDFViewerApplication = {
     this.preferences = this.externalServices.createPreferences();
     this.appConfig = appConfig;
 
-    await this._readPreferences();
-    await this._parseHashParameters();
+    await this._initializeOptions();
     this._forceCssTheme();
     await this._initializeL10n();
 
@@ -267,19 +270,19 @@ const PDFViewerApplication = {
   /**
    * @private
    */
-  async _readPreferences() {
-    if (
-      typeof PDFJSDev === "undefined" ||
-      PDFJSDev.test("!PRODUCTION || GENERIC")
-    ) {
+  async _initializeOptions() {
+    if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
       if (AppOptions.get("disablePreferences")) {
+        if (AppOptions.get("pdfBugEnabled")) {
+          await this._parseHashParams();
+        }
         // Give custom implementations of the default viewer a simpler way to
         // opt-out of having the `Preferences` override existing `AppOptions`.
         return;
       }
       if (AppOptions._hasUserOptions()) {
         console.warn(
-          "_readPreferences: The Preferences may override manually set AppOptions; " +
+          "_initializeOptions: The Preferences may override manually set AppOptions; " +
             'please use the "disablePreferences"-option in order to prevent that.'
         );
       }
@@ -287,7 +290,11 @@ const PDFViewerApplication = {
     try {
       AppOptions.setAll(await this.preferences.getAll());
     } catch (reason) {
-      console.error(`_readPreferences: "${reason?.message}".`);
+      console.error(`_initializeOptions: "${reason.message}".`);
+    }
+
+    if (AppOptions.get("pdfBugEnabled")) {
+      await this._parseHashParams();
     }
   },
 
@@ -295,10 +302,7 @@ const PDFViewerApplication = {
    * Potentially parse special debugging flags in the hash section of the URL.
    * @private
    */
-  async _parseHashParameters() {
-    if (!AppOptions.get("pdfBugEnabled")) {
-      return;
-    }
+  async _parseHashParams() {
     const hash = document.location.hash.substring(1);
     if (!hash) {
       return;
@@ -315,7 +319,7 @@ const PDFViewerApplication = {
       try {
         await loadFakeWorker();
       } catch (ex) {
-        console.error(`_parseHashParameters: "${ex.message}".`);
+        console.error(`_parseHashParams: "${ex.message}".`);
       }
     }
     if (params.has("disablerange")) {
@@ -355,7 +359,7 @@ const PDFViewerApplication = {
             await loadPDFBug(this);
             this._PDFBug.loadCSS();
           } catch (ex) {
-            console.error(`_parseHashParameters: "${ex.message}".`);
+            console.error(`_parseHashParams: "${ex.message}".`);
           }
           break;
       }
@@ -369,7 +373,7 @@ const PDFViewerApplication = {
         await loadPDFBug(this);
         this._PDFBug.init({ OPS }, mainContainer, enabled);
       } catch (ex) {
-        console.error(`_parseHashParameters: "${ex.message}".`);
+        console.error(`_parseHashParams: "${ex.message}".`);
       }
     }
     // It is not possible to change locale for the (various) extension builds.
@@ -532,7 +536,6 @@ const PDFViewerApplication = {
     if (appConfig.sidebar?.thumbnailView) {
       this.pdfThumbnailViewer = new PDFThumbnailViewer({
         container: appConfig.sidebar.thumbnailView,
-        eventBus,
         renderingQueue: pdfRenderingQueue,
         linkService: pdfLinkService,
         l10n: this.l10n,
@@ -946,7 +949,11 @@ const PDFViewerApplication = {
     }
     // Set the necessary API parameters, using all the available options.
     const apiParams = AppOptions.getAll(OptionKind.API);
-    const params = { ...apiParams, ...args };
+    const params = {
+      canvasMaxAreaInBytes: this.externalServices.canvasMaxAreaInBytes,
+      ...apiParams,
+      ...args,
+    };
 
     if (typeof PDFJSDev === "undefined" || !PDFJSDev.test("PRODUCTION")) {
       params.docBaseUrl ||= document.URL.split("#")[0];

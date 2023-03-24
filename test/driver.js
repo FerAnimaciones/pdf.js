@@ -135,6 +135,7 @@ async function convertCanvasesToImages(annotationCanvasMap, outputScale) {
       new Promise(resolve => {
         canvas.toBlob(blob => {
           const image = document.createElement("img");
+          image.classList.add("wasCanvas");
           image.onload = function () {
             image.style.width = Math.floor(image.width / outputScale) + "px";
             resolve();
@@ -457,7 +458,6 @@ class Driver {
 
       this._log('Loading file "' + task.file + '"\n');
 
-      const absoluteUrl = new URL(task.file, window.location).href;
       try {
         let xfaStyleElement = null;
         if (task.enableXfa) {
@@ -469,41 +469,37 @@ class Driver {
             .getElementsByTagName("head")[0]
             .append(xfaStyleElement);
         }
+        const isOffscreenCanvasSupported =
+          task.isOffscreenCanvasSupported === false ? false : undefined;
 
         const loadingTask = getDocument({
-          url: absoluteUrl,
+          url: new URL(task.file, window.location),
           password: task.password,
           cMapUrl: CMAP_URL,
           standardFontDataUrl: STANDARD_FONT_DATA_URL,
-          disableRange: task.disableRange,
           disableAutoFetch: !task.enableAutoFetch,
           pdfBug: true,
           useSystemFonts: task.useSystemFonts,
           useWorkerFetch: task.useWorkerFetch,
           enableXfa: task.enableXfa,
+          isOffscreenCanvasSupported,
           styleElement: xfaStyleElement,
         });
         let promise = loadingTask.promise;
 
         if (task.save) {
-          if (!task.annotationStorage) {
-            promise = Promise.reject(
-              new Error("Missing `annotationStorage` entry.")
-            );
-          } else {
-            promise = loadingTask.promise.then(async doc => {
-              for (const [key, value] of Object.entries(
-                task.annotationStorage
-              )) {
-                doc.annotationStorage.setValue(key, value);
-              }
-              const data = await doc.saveDocument();
-              await loadingTask.destroy();
-              delete task.annotationStorage;
+          promise = loadingTask.promise.then(async doc => {
+            if (!task.annotationStorage) {
+              throw new Error("Missing `annotationStorage` entry.");
+            }
+            doc.annotationStorage.setAll(task.annotationStorage);
 
-              return getDocument(data).promise;
-            });
-          }
+            const data = await doc.saveDocument();
+            await loadingTask.destroy();
+            delete task.annotationStorage;
+
+            return getDocument(data).promise;
+          });
         }
 
         promise.then(
@@ -633,6 +629,9 @@ class Driver {
             let viewport = page.getViewport({
               scale: PixelsPerInch.PDF_TO_CSS_UNITS,
             });
+            if (task.rotation) {
+              viewport = viewport.clone({ rotation: task.rotation });
+            }
             // Restrict the test from creating a canvas that is too big.
             const MAX_CANVAS_PIXEL_DIMENSION = 4096;
             const largestDimension = Math.max(viewport.width, viewport.height);
@@ -668,11 +667,7 @@ class Driver {
               pageColors = null;
 
             if (task.annotationStorage) {
-              const entries = Object.entries(task.annotationStorage),
-                docAnnotationStorage = task.pdfDoc.annotationStorage;
-              for (const [key, value] of entries) {
-                docAnnotationStorage.setValue(key, value);
-              }
+              task.pdfDoc.annotationStorage.setAll(task.annotationStorage);
             }
 
             let textLayerCanvas, annotationLayerCanvas, annotationLayerContext;
