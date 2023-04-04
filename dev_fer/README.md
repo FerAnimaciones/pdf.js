@@ -1,6 +1,6 @@
 # NPM INSTLL
 
-Verificar la cache si no permite installar paquetes.
+Verificar la cache si no permite instalar paquetes.
 ```
 npm cache verify
 ```
