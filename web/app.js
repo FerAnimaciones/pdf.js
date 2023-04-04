@@ -27,7 +27,6 @@ import {
   normalizeWheelEventDirection,
   parseQueryString,
   ProgressBar,
-  RendererType,
   RenderingStates,
   ScrollMode,
   SidebarView,
@@ -512,11 +511,6 @@ const PDFViewerApplication = {
       findController,
       scriptingManager:
         AppOptions.get("enableScripting") && pdfScriptingManager,
-      renderer:
-        typeof PDFJSDev === "undefined" ||
-        PDFJSDev.test("!PRODUCTION || GENERIC")
-          ? AppOptions.get("renderer")
-          : null,
       l10n: this.l10n,
       textLayerMode: AppOptions.get("textLayerMode"),
       annotationMode: AppOptions.get("annotationMode"),
@@ -1174,20 +1168,17 @@ const PDFViewerApplication = {
     this.toolbar?.setPagesCount(pdfDocument.numPages, false);
     this.secondaryToolbar?.setPagesCount(pdfDocument.numPages);
 
-    let baseDocumentUrl;
-    if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
-      baseDocumentUrl = null;
-    } else if (PDFJSDev.test("MOZCENTRAL")) {
-      baseDocumentUrl = this.baseUrl;
-    } else if (PDFJSDev.test("CHROME")) {
-      baseDocumentUrl = location.href.split("#")[0];
-    }
-    if (baseDocumentUrl && isDataScheme(baseDocumentUrl)) {
+    if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("CHROME")) {
+      const baseUrl = location.href.split("#")[0];
       // Ignore "data:"-URLs for performance reasons, even though it may cause
       // internal links to not work perfectly in all cases (see bug 1803050).
-      baseDocumentUrl = null;
+      this.pdfLinkService.setDocument(
+        pdfDocument,
+        isDataScheme(baseUrl) ? null : baseUrl
+      );
+    } else {
+      this.pdfLinkService.setDocument(pdfDocument);
     }
-    this.pdfLinkService.setDocument(pdfDocument, baseDocumentUrl);
     this.pdfDocumentProperties?.setDocument(pdfDocument);
 
     const pdfViewer = this.pdfViewer;
@@ -1717,17 +1708,7 @@ const PDFViewerApplication = {
     this.pdfViewer.cleanup();
     this.pdfThumbnailViewer?.cleanup();
 
-    if (
-      typeof PDFJSDev === "undefined" ||
-      PDFJSDev.test("!PRODUCTION || GENERIC")
-    ) {
-      // We don't want to remove fonts used by active page SVGs.
-      this.pdfDocument.cleanup(
-        /* keepLoadedFonts = */ this.pdfViewer.renderer === RendererType.SVG
-      );
-    } else {
-      this.pdfDocument.cleanup();
-    }
+    this.pdfDocument.cleanup();
   },
 
   forceRendering() {
