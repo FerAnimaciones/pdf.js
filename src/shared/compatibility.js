@@ -36,23 +36,7 @@ import { isNodeJS } from "./is_node.js";
   polyfillPath2D(globalThis);
 })();
 
-// Support: Chrome<92, Safari<15.4
-(function checkArrayAt() {
-  if (Array.prototype.at) {
-    return;
-  }
-  require("core-js/es/array/at.js");
-})();
-
-// Support: Chrome<92, Safari<15.4
-(function checkTypedArrayAt() {
-  if (Uint8Array.prototype.at) {
-    return;
-  }
-  require("core-js/es/typed-array/at.js");
-})();
-
-// Support: Chrome<98, Safari<15.4
+// Support: Chrome<98
 (function checkStructuredClone() {
   if (globalThis.structuredClone) {
     return;
