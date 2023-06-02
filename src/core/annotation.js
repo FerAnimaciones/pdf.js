@@ -3334,15 +3334,15 @@ class ChoiceWidgetAnnotation extends WidgetAnnotation {
     const vPadding = (lineHeight - fontSize) / 2;
     const numberOfVisibleLines = Math.floor(totalHeight / lineHeight);
 
-    let firstIndex;
-    if (valueIndices.length === 1) {
-      const valuePosition = valueIndices[0];
-      const indexInPage = valuePosition % numberOfVisibleLines;
-      firstIndex = valuePosition - indexInPage;
-    } else {
-      // If nothing is selected (valueIndice.length === 0), we render
-      // from the first element.
-      firstIndex = valueIndices.length ? valueIndices[0] : 0;
+    let firstIndex = 0;
+    if (valueIndices.length > 0) {
+      const minIndex = Math.min(...valueIndices);
+      const maxIndex = Math.max(...valueIndices);
+
+      firstIndex = Math.max(0, maxIndex - numberOfVisibleLines + 1);
+      if (firstIndex > minIndex) {
+        firstIndex = minIndex;
+      }
     }
     const end = Math.min(firstIndex + numberOfVisibleLines + 1, lineCount);
 
@@ -4056,7 +4056,7 @@ class InkAnnotation extends MarkupAnnotation {
   }
 
   static createNewDict(annotation, xref, { apRef, ap }) {
-    const { paths, rect, rotation } = annotation;
+    const { color, opacity, paths, rect, rotation, thickness } = annotation;
     const ink = new Dict(xref);
     ink.set("Type", Name.get("Annot"));
     ink.set("Subtype", Name.get("Ink"));
@@ -4067,8 +4067,21 @@ class InkAnnotation extends MarkupAnnotation {
       paths.map(p => p.points)
     );
     ink.set("F", 4);
-    ink.set("Border", [0, 0, 0]);
     ink.set("Rotate", rotation);
+
+    // Line thickness.
+    const bs = new Dict(xref);
+    ink.set("BS", bs);
+    bs.set("W", thickness);
+
+    // Color.
+    ink.set(
+      "C",
+      Array.from(color, c => c / 255)
+    );
+
+    // Opacity.
+    ink.set("CA", opacity);
 
     const n = new Dict(xref);
     ink.set("AP", n);
@@ -4123,13 +4136,8 @@ class InkAnnotation extends MarkupAnnotation {
     appearanceStreamDict.set("FormType", 1);
     appearanceStreamDict.set("Subtype", Name.get("Form"));
     appearanceStreamDict.set("Type", Name.get("XObject"));
-    appearanceStreamDict.set("BBox", [0, 0, w, h]);
+    appearanceStreamDict.set("BBox", rect);
     appearanceStreamDict.set("Length", appearance.length);
-
-    if (rotation) {
-      const matrix = getRotationMatrix(rotation, w, h);
-      appearanceStreamDict.set("Matrix", matrix);
-    }
 
     if (opacity !== 1) {
       const resources = new Dict(xref);

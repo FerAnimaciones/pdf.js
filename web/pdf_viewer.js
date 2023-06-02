@@ -259,6 +259,11 @@ class PDFViewer {
     this.linkService = options.linkService || new SimpleLinkService();
     this.downloadManager = options.downloadManager || null;
     this.findController = options.findController || null;
+
+    if (this.findController) {
+      this.findController.onIsPageVisible = pageNumber =>
+        this._getVisiblePages().ids.has(pageNumber);
+    }
     this._scriptingManager = options.scriptingManager || null;
     this.#textLayerMode = options.textLayerMode ?? TextLayerMode.ENABLE;
     this.#annotationMode =
@@ -317,6 +322,15 @@ class PDFViewer {
     }
 
     this.#updateContainerHeightCss();
+
+    // Trigger API-cleanup, once thumbnail rendering has finished,
+    // if the relevant pageView is *not* cached in the buffer.
+    this.eventBus._on("thumbnailrendered", ({ pageNumber, pdfPage }) => {
+      const pageView = this._pages[pageNumber - 1];
+      if (!this.#buffer.has(pageView)) {
+        pdfPage?.cleanup();
+      }
+    });
   }
 
   get pagesCount() {
@@ -325,6 +339,10 @@ class PDFViewer {
 
   getPageView(index) {
     return this._pages[index];
+  }
+
+  getCachedPageViews() {
+    return new Set(this.#buffer);
   }
 
   /**
@@ -1638,47 +1656,6 @@ class PDFViewer {
       horizontal,
       rtl,
     });
-  }
-
-  /**
-   * @param {number} pageNumber
-   */
-  isPageVisible(pageNumber) {
-    if (!this.pdfDocument) {
-      return false;
-    }
-    if (
-      !(
-        Number.isInteger(pageNumber) &&
-        pageNumber > 0 &&
-        pageNumber <= this.pagesCount
-      )
-    ) {
-      console.error(`isPageVisible: "${pageNumber}" is not a valid page.`);
-      return false;
-    }
-    return this._getVisiblePages().ids.has(pageNumber);
-  }
-
-  /**
-   * @param {number} pageNumber
-   */
-  isPageCached(pageNumber) {
-    if (!this.pdfDocument) {
-      return false;
-    }
-    if (
-      !(
-        Number.isInteger(pageNumber) &&
-        pageNumber > 0 &&
-        pageNumber <= this.pagesCount
-      )
-    ) {
-      console.error(`isPageCached: "${pageNumber}" is not a valid page.`);
-      return false;
-    }
-    const pageView = this._pages[pageNumber - 1];
-    return this.#buffer.has(pageView);
   }
 
   cleanup() {
