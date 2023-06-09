@@ -26,6 +26,7 @@ import {
 } from "../../shared/util.js";
 import { bindEvents, KeyboardManager } from "./tools.js";
 import { AnnotationEditor } from "./editor.js";
+import { FreeTextAnnotationElement } from "../annotation_layer.js";
 
 /**
  * Basic text editor in order to create a FreeTex annotation.
@@ -45,8 +46,6 @@ class FreeTextEditor extends AnnotationEditor {
 
   #editorDivId = `${this.id}-editor`;
 
-  #hasAlreadyBeenCommitted = false;
-
   #fontSize;
 
   static _freeTextDefaultContent = "";
@@ -64,6 +63,14 @@ class FreeTextEditor extends AnnotationEditor {
       this,
       "_keyboardManager",
       new KeyboardManager([
+        [
+          // Commit the text in case the user use ctrl+s to save the document.
+          // The event must bubble in order to be caught by the viewer.
+          // See bug 1831574.
+          ["ctrl+s", "mac+meta+s", "ctrl+p", "mac+meta+p"],
+          FreeTextEditor.prototype.commitOrRemove,
+          /* bubbles = */ true,
+        ],
         [
           ["ctrl+Enter", "mac+meta+Enter", "Escape", "mac+Escape"],
           FreeTextEditor.prototype.commitOrRemove,
@@ -346,16 +353,32 @@ class FreeTextEditor extends AnnotationEditor {
     }
 
     super.commit();
-    if (!this.#hasAlreadyBeenCommitted) {
-      // This editor has something and it's the first time
-      // it's commited so we can add it in the undo/redo stack.
-      this.#hasAlreadyBeenCommitted = true;
-      this.parent.addUndoableEditor(this);
+    this.disableEditMode();
+    const savedText = this.#content;
+    const newText = (this.#content = this.#extractText().trimEnd());
+    if (savedText === newText) {
+      return;
     }
 
-    this.disableEditMode();
-    this.#content = this.#extractText().trimEnd();
-
+    const setText = text => {
+      this.#content = text;
+      if (!text) {
+        this.remove();
+        return;
+      }
+      this.#setContent();
+      this.rebuild();
+      this.#setEditorDimensions();
+    };
+    this.addCommands({
+      cmd: () => {
+        setText(newText);
+      },
+      undo: () => {
+        setText(savedText);
+      },
+      mustExec: false,
+    });
     this.#setEditorDimensions();
   }
 
@@ -465,14 +488,7 @@ class FreeTextEditor extends AnnotationEditor {
         this.height * parentHeight
       );
 
-      for (const line of this.#content.split("\n")) {
-        const div = document.createElement("div");
-        div.append(
-          line ? document.createTextNode(line) : document.createElement("br")
-        );
-        this.editorDiv.append(div);
-      }
-
+      this.#setContent();
       this.div.draggable = true;
       this.editorDiv.contentEditable = false;
     } else {
@@ -483,12 +499,29 @@ class FreeTextEditor extends AnnotationEditor {
     return this.div;
   }
 
+  #setContent() {
+    this.editorDiv.replaceChildren();
+    if (!this.#content) {
+      return;
+    }
+    for (const line of this.#content.split("\n")) {
+      const div = document.createElement("div");
+      div.append(
+        line ? document.createTextNode(line) : document.createElement("br")
+      );
+      this.editorDiv.append(div);
+    }
+  }
+
   get contentDiv() {
     return this.editorDiv;
   }
 
   /** @inheritdoc */
   static deserialize(data, parent, uiManager) {
+    if (data instanceof FreeTextAnnotationElement) {
+      return null;
+    }
     const editor = super.deserialize(data, parent, uiManager);
 
     editor.#fontSize = data.fontSize;

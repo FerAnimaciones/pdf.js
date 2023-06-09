@@ -67,6 +67,7 @@ class AnnotationEditor {
     this.name = parameters.name;
     this.div = null;
     this._uiManager = parameters.uiManager;
+    this.annotationElement = null;
 
     const {
       rotation,
@@ -471,6 +472,7 @@ class AnnotationEditor {
    */
   rebuild() {
     this.div?.addEventListener("focusin", this.#boundFocusin);
+    this.div?.addEventListener("focusout", this.#boundFocusout);
   }
 
   /**
@@ -598,6 +600,15 @@ class AnnotationEditor {
     } else {
       this.parent.setActiveEditor(null);
     }
+  }
+
+  /**
+   * Check if the editor has been changed.
+   * @param {Object} serialized
+   * @returns {boolean}
+   */
+  hasElementChanged(serialized = null) {
+    return false;
   }
 }
 

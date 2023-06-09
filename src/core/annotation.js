@@ -48,6 +48,7 @@ import {
   createDefaultAppearance,
   FakeUnicodeFont,
   getPdfColor,
+  parseAppearanceStream,
   parseDefaultAppearance,
 } from "./default_appearance.js";
 import { Dict, isName, Name, Ref, RefSet } from "./primitives.js";
@@ -3545,20 +3546,25 @@ class FreeTextAnnotation extends MarkupAnnotation {
     const { xref } = params;
     this.data.annotationType = AnnotationType.FREETEXT;
     this.setDefaultAppearance(params);
-    if (!this.appearance && this._isOffscreenCanvasSupported) {
+    if (this.appearance) {
+      const { fontColor, fontSize } = parseAppearanceStream(this.appearance);
+      this.data.defaultAppearanceData.fontColor = fontColor;
+      this.data.defaultAppearanceData.fontSize = fontSize || 10;
+    } else if (this._isOffscreenCanvasSupported) {
       const strokeAlpha = params.dict.get("CA");
       const fakeUnicodeFont = new FakeUnicodeFont(xref, "sans-serif");
-      const fontData = this.data.defaultAppearanceData;
+      this.data.defaultAppearanceData.fontSize ||= 10;
+      const { fontColor, fontSize } = this.data.defaultAppearanceData;
       this.appearance = fakeUnicodeFont.createAppearance(
         this._contents.str,
         this.rectangle,
         this.rotation,
-        fontData.fontSize || 10,
-        fontData.fontColor,
+        fontSize,
+        fontColor,
         strokeAlpha
       );
       this._streams.push(this.appearance, FakeUnicodeFont.toUnicodeStream);
-    } else if (!this._isOffscreenCanvasSupported) {
+    } else {
       warn(
         "FreeTextAnnotation: OffscreenCanvas is not supported, annotation may not render correctly."
       );
@@ -4096,14 +4102,7 @@ class InkAnnotation extends MarkupAnnotation {
   }
 
   static async createNewAppearanceStream(annotation, xref, params) {
-    const { color, rect, rotation, paths, thickness, opacity } = annotation;
-    const [x1, y1, x2, y2] = rect;
-    let w = x2 - x1;
-    let h = y2 - y1;
-
-    if (rotation % 180 !== 0) {
-      [w, h] = [h, w];
-    }
+    const { color, rect, paths, thickness, opacity } = annotation;
 
     const appearanceBuffer = [
       `${thickness} w 1 J 1 j`,

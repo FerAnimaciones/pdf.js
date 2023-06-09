@@ -20,6 +20,7 @@
 
 import {
   AnnotationBorderStyleType,
+  AnnotationEditorType,
   AnnotationType,
   assert,
   FeatureTest,
@@ -504,7 +505,7 @@ class AnnotationElement {
    *
    * @public
    * @memberof AnnotationElement
-   * @returns {HTMLElement|Array<HTMLElement>} A section element or
+   * @returns {HTMLElement|Array<HTMLElement>|undefined} A section element or
    *   an array of section elements.
    */
   render() {
@@ -557,6 +558,18 @@ class AnnotationElement {
       fields.push({ id, exportValue, domElement });
     }
     return fields;
+  }
+
+  show() {
+    if (this.container) {
+      this.container.hidden = false;
+    }
+  }
+
+  hide() {
+    if (this.container) {
+      this.container.hidden = true;
+    }
   }
 }
 
@@ -2048,6 +2061,7 @@ class FreeTextAnnotationElement extends AnnotationElement {
     );
     super(parameters, { isRenderable, ignoreBorder: true });
     this.textContent = parameters.data.textContent;
+    this.annotationEditorType = AnnotationEditorType.FREETEXT;
   }
 
   render() {
@@ -2328,6 +2342,7 @@ class InkAnnotationElement extends AnnotationElement {
     // Use the polyline SVG element since it allows us to use coordinates
     // directly and to draw both straight lines and curves.
     this.svgElementName = "svg:polyline";
+    this.annotationEditorType = AnnotationEditorType.INK;
   }
 
   render() {
@@ -2596,14 +2611,31 @@ class FileAttachmentAnnotationElement extends AnnotationElement {
  * @property {TextAccessibilityManager} [accessibilityManager]
  */
 
+/**
+ * Manage the layer containing all the annotations.
+ */
 class AnnotationLayer {
-  static #appendElement(element, id, div, accessibilityManager) {
+  #accessibilityManager = null;
+
+  #annotationCanvasMap = null;
+
+  #div = null;
+
+  #editableAnnotations = new Set();
+
+  constructor({ div, accessibilityManager, annotationCanvasMap }) {
+    this.#div = div;
+    this.#accessibilityManager = accessibilityManager;
+    this.#annotationCanvasMap = annotationCanvasMap;
+  }
+
+  #appendElement(element, id) {
     const contentElement = element.firstChild || element;
     contentElement.id = `${AnnotationPrefix}${id}`;
 
-    div.append(element);
-    accessibilityManager?.moveElementInDOM(
-      div,
+    this.#div.append(element);
+    this.#accessibilityManager?.moveElementInDOM(
+      this.#div,
       element,
       contentElement,
       /* isRemovable = */ false
@@ -2616,13 +2648,14 @@ class AnnotationLayer {
    * @param {AnnotationLayerParameters} params
    * @memberof AnnotationLayer
    */
-  static render(params) {
-    const { annotations, div, viewport, accessibilityManager } = params;
-    setLayerDimensions(div, viewport);
+  render(params) {
+    const { annotations, viewport } = params;
+    const layer = this.#div;
+    setLayerDimensions(layer, viewport);
 
     const elementParams = {
       data: null,
-      layer: div,
+      layer,
       page: params.page,
       viewport,
       linkService: params.linkService,
@@ -2653,6 +2686,11 @@ class AnnotationLayer {
       if (!element.isRenderable) {
         continue;
       }
+
+      if (element.annotationEditorType > 0) {
+        this.#editableAnnotations.add(element);
+      }
+
       const rendered = element.render();
       if (data.hidden) {
         rendered.style.visibility = "hidden";
@@ -2660,12 +2698,7 @@ class AnnotationLayer {
       if (Array.isArray(rendered)) {
         for (const renderedElement of rendered) {
           renderedElement.style.zIndex = zIndex++;
-          AnnotationLayer.#appendElement(
-            renderedElement,
-            data.id,
-            div,
-            accessibilityManager
-          );
+          this.#appendElement(renderedElement, data.id);
         }
       } else {
         // The accessibility manager will move the annotation in the DOM in
@@ -2678,41 +2711,37 @@ class AnnotationLayer {
         if (element instanceof PopupAnnotationElement) {
           // Popup annotation elements should not be on top of other
           // annotation elements to prevent interfering with mouse events.
-          div.prepend(rendered);
+          layer.prepend(rendered);
         } else {
-          AnnotationLayer.#appendElement(
-            rendered,
-            data.id,
-            div,
-            accessibilityManager
-          );
+          this.#appendElement(rendered, data.id);
         }
       }
     }
 
-    this.#setAnnotationCanvasMap(div, params.annotationCanvasMap);
+    this.#setAnnotationCanvasMap();
   }
 
   /**
    * Update the annotation elements on existing annotation layer.
    *
-   * @param {AnnotationLayerParameters} params
+   * @param {AnnotationLayerParameters} viewport
    * @memberof AnnotationLayer
    */
-  static update(params) {
-    const { annotationCanvasMap, div, viewport } = params;
-    setLayerDimensions(div, { rotation: viewport.rotation });
+  update({ viewport }) {
+    const layer = this.#div;
+    setLayerDimensions(layer, { rotation: viewport.rotation });
 
-    this.#setAnnotationCanvasMap(div, annotationCanvasMap);
-    div.hidden = false;
+    this.#setAnnotationCanvasMap();
+    layer.hidden = false;
   }
 
-  static #setAnnotationCanvasMap(div, annotationCanvasMap) {
-    if (!annotationCanvasMap) {
+  #setAnnotationCanvasMap() {
+    if (!this.#annotationCanvasMap) {
       return;
     }
-    for (const [id, canvas] of annotationCanvasMap) {
-      const element = div.querySelector(`[data-annotation-id="${id}"]`);
+    const layer = this.#div;
+    for (const [id, canvas] of this.#annotationCanvasMap) {
+      const element = layer.querySelector(`[data-annotation-id="${id}"]`);
       if (!element) {
         continue;
       }
@@ -2726,8 +2755,12 @@ class AnnotationLayer {
         firstChild.before(canvas);
       }
     }
-    annotationCanvasMap.clear();
+    this.#annotationCanvasMap.clear();
+  }
+
+  getEditableAnnotations() {
+    return this.#editableAnnotations;
   }
 }
 
-export { AnnotationLayer };
+export { AnnotationLayer, FreeTextAnnotationElement, InkAnnotationElement };
