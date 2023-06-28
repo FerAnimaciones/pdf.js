@@ -70,6 +70,7 @@ const AnnotationEditorType = {
   DISABLE: -1,
   NONE: 0,
   FREETEXT: 3,
+  STAMP: 13,
   INK: 15,
 };
 
@@ -140,24 +141,6 @@ const AnnotationType = {
   WATERMARK: 24,
   THREED: 25,
   REDACT: 26,
-};
-
-const AnnotationStateModelType = {
-  MARKED: "Marked",
-  REVIEW: "Review",
-};
-
-const AnnotationMarkedState = {
-  MARKED: "Marked",
-  UNMARKED: "Unmarked",
-};
-
-const AnnotationReviewState = {
-  ACCEPTED: "Accepted",
-  REJECTED: "Rejected",
-  CANCELLED: "Cancelled",
-  COMPLETED: "Completed",
-  NONE: "None",
 };
 
 const AnnotationReplyType = {
@@ -434,7 +417,7 @@ function createValidAbsoluteUrl(url, baseUrl = null, options = null) {
       if (options.tryConvertEncoding) {
         try {
           url = stringToUTF8String(url);
-        } catch (ex) {}
+        } catch {}
       }
     }
 
@@ -442,7 +425,7 @@ function createValidAbsoluteUrl(url, baseUrl = null, options = null) {
     if (_isValidProtocol(absoluteUrl)) {
       return absoluteUrl;
     }
-  } catch (ex) {
+  } catch {
     /* `new URL()` will throw on incorrect data. */
   }
   return null;
@@ -605,7 +588,7 @@ function isEvalSupported() {
   try {
     new Function(""); // eslint-disable-line no-new, no-new-func
     return true;
-  } catch (e) {
+  } catch {
     return false;
   }
 }
@@ -1040,11 +1023,8 @@ export {
   AnnotationEditorType,
   AnnotationFieldFlag,
   AnnotationFlag,
-  AnnotationMarkedState,
   AnnotationMode,
   AnnotationReplyType,
-  AnnotationReviewState,
-  AnnotationStateModelType,
   AnnotationType,
   assert,
   BaseException,

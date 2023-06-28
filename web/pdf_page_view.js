@@ -170,6 +170,7 @@ class PDFPageView {
     this.resume = null;
     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
       this._isStandalone = !this.renderingQueue?.hasViewer();
+      this._container = container;
     }
 
     this._annotationCanvasMap = null;
@@ -276,6 +277,22 @@ class PDFPageView {
   }
 
   setPdfPage(pdfPage) {
+    if (
+      (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) &&
+      this._isStandalone &&
+      (this.pageColors?.foreground === "CanvasText" ||
+        this.pageColors?.background === "Canvas")
+    ) {
+      this._container?.style.setProperty(
+        "--hcm-highligh-filter",
+        pdfPage.filterFactory.addHighlightHCMFilter(
+          "CanvasText",
+          "Canvas",
+          "HighlightText",
+          "Highlight"
+        )
+      );
+    }
     this.pdfPage = pdfPage;
     this.pdfPageRotate = pdfPage.rotate;
 
@@ -566,10 +583,7 @@ class PDFPageView {
       (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) &&
       this._isStandalone
     ) {
-      this.div.parentNode?.style.setProperty(
-        "--scale-factor",
-        this.viewport.scale
-      );
+      this._container?.style.setProperty("--scale-factor", this.viewport.scale);
     }
 
     let isScalingRestricted = false;

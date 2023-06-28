@@ -523,7 +523,7 @@ function getUrlProp(val) {
   try {
     // The full path is required in the 'url' field.
     return new URL(val, window.location).href;
-  } catch (ex) {
+  } catch {
     if (
       typeof PDFJSDev !== "undefined" &&
       PDFJSDev.test("GENERIC") &&
@@ -778,6 +778,11 @@ class PDFDocumentProxy {
       Object.defineProperty(this, "getXRefPrevValue", {
         value: () => {
           return this._transport.getXRefPrevValue();
+        },
+      });
+      Object.defineProperty(this, "getAnnotArray", {
+        value: pageIndex => {
+          return this._transport.getAnnotArray(pageIndex);
         },
       });
     }
@@ -1377,6 +1382,13 @@ class PDFPageProxy {
   }
 
   /**
+   * @type {Object} The filter factory instance.
+   */
+  get filterFactory() {
+    return this._transport.filterFactory;
+  }
+
+  /**
    * @type {boolean} True if only XFA form.
    */
   get isPureXfa() {
@@ -1524,7 +1536,7 @@ class PDFPageProxy {
       optionalContentConfigPromise,
     ])
       .then(([transparency, optionalContentConfig]) => {
-        if (this.#pendingCleanup) {
+        if (this.destroyed) {
           complete();
           return;
         }
@@ -1552,6 +1564,9 @@ class PDFPageProxy {
     annotationMode = AnnotationMode.ENABLE,
     printAnnotationStorage = null,
   } = {}) {
+    if (typeof PDFJSDev !== "undefined" && !PDFJSDev.test("GENERIC")) {
+      throw new Error("Not implemented: getOperatorList");
+    }
     function operatorListChanged() {
       if (intentState.operatorList.lastChunk) {
         intentState.opListReadCapability.resolve(intentState.operatorList);
@@ -1727,7 +1742,7 @@ class PDFPageProxy {
   #tryCleanup(delayed = false) {
     this.#abortDelayedCleanup();
 
-    if (!this.#pendingCleanup) {
+    if (!this.#pendingCleanup || this.destroyed) {
       return false;
     }
     if (delayed) {
@@ -1804,6 +1819,15 @@ class PDFPageProxy {
       );
     }
 
+    const transfers = [];
+    if (annotationStorageMap) {
+      for (const annotation of annotationStorageMap.values()) {
+        if (annotation.bitmap) {
+          transfers.push(annotation.bitmap);
+        }
+      }
+    }
+
     const readableStream = this._transport.messageHandler.sendWithStream(
       "GetOperatorList",
       {
@@ -1811,7 +1835,8 @@ class PDFPageProxy {
         intent: renderingIntent,
         cacheKey,
         annotationStorage: annotationStorageMap,
-      }
+      },
+      transfers
     );
     const reader = readableStream.getReader();
 
@@ -2011,7 +2036,7 @@ if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
       if (!base.origin || base.origin === "null") {
         return false; // non-HTTP url
       }
-    } catch (e) {
+    } catch {
       return false;
     }
 
@@ -2187,7 +2212,7 @@ class PDFWorker {
           }
           try {
             sendTest();
-          } catch (e) {
+          } catch {
             // We need fallback to a faked worker.
             this._setupFakeWorker();
           }
@@ -2204,7 +2229,7 @@ class PDFWorker {
         // The worker shall process only the first received "test" message.
         sendTest();
         return;
-      } catch (e) {
+      } catch {
         info("The worker has been disabled.");
       }
     }
@@ -2305,7 +2330,7 @@ class PDFWorker {
   static get _mainThreadWorkerMessageHandler() {
     try {
       return globalThis.pdfjsWorker?.WorkerMessageHandler || null;
-    } catch (ex) {
+    } catch {
       return null;
     }
   }
@@ -2400,6 +2425,13 @@ class WorkerTransport {
       Object.defineProperty(this, "getXRefPrevValue", {
         value: () => {
           return this.messageHandler.sendWithPromise("GetXRefPrevValue", null);
+        },
+      });
+      Object.defineProperty(this, "getAnnotArray", {
+        value: pageIndex => {
+          return this.messageHandler.sendWithPromise("GetAnnotArray", {
+            pageIndex,
+          });
         },
       });
     }
@@ -2883,13 +2915,26 @@ class WorkerTransport {
           "please use the getData-method instead."
       );
     }
+    const annotationStorage = this.annotationStorage.serializable;
+    const transfers = [];
+    if (annotationStorage) {
+      for (const annotation of annotationStorage.values()) {
+        if (annotation.bitmap) {
+          transfers.push(annotation.bitmap);
+        }
+      }
+    }
     return this.messageHandler
-      .sendWithPromise("SaveDocument", {
-        isPureXfa: !!this._htmlForXfa,
-        numPages: this._numPages,
-        annotationStorage: this.annotationStorage.serializable,
-        filename: this._fullReader?.filename ?? null,
-      })
+      .sendWithPromise(
+        "SaveDocument",
+        {
+          isPureXfa: !!this._htmlForXfa,
+          numPages: this._numPages,
+          annotationStorage,
+          filename: this._fullReader?.filename ?? null,
+        },
+        transfers
+      )
       .finally(() => {
         this.annotationStorage.resetModified();
       });
@@ -3347,7 +3392,6 @@ class InternalRenderTask {
       error ||
         new RenderingCancelledException(
           `Rendering cancelled, page ${this._pageIndex + 1}`,
-          "canvas",
           extraDelay
         )
     );

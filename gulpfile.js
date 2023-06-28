@@ -185,10 +185,7 @@ function createWebpackConfig(
   const bundleDefines = builder.merge(defines, {
     BUNDLE_VERSION: versionInfo.version,
     BUNDLE_BUILD: versionInfo.commit,
-    TESTING:
-      defines.TESTING !== undefined
-        ? defines.TESTING
-        : process.env.TESTING === "true",
+    TESTING: defines.TESTING ?? process.env.TESTING === "true",
     DEFAULT_PREFERENCES: defaultPreferencesDir
       ? getDefaultPreferences(defaultPreferencesDir)
       : {},
@@ -594,7 +591,7 @@ function checkFile(filePath) {
   try {
     const stat = fs.lstatSync(filePath);
     return stat.isFile();
-  } catch (e) {
+  } catch {
     return false;
   }
 }
@@ -603,7 +600,7 @@ function checkDir(dirPath) {
   try {
     const stat = fs.lstatSync(dirPath);
     return stat.isDirectory();
-  } catch (e) {
+  } catch {
     return false;
   }
 }
@@ -769,10 +766,7 @@ function buildDefaultPreferences(defines, dir) {
     SKIP_BABEL: false,
     BUNDLE_VERSION: 0, // Dummy version
     BUNDLE_BUILD: 0, // Dummy build
-    TESTING:
-      defines.TESTING !== undefined
-        ? defines.TESTING
-        : process.env.TESTING === "true",
+    TESTING: defines.TESTING ?? process.env.TESTING === "true",
   });
 
   const inputStream = merge([
@@ -1547,10 +1541,7 @@ function buildLib(defines, dir) {
   const bundleDefines = builder.merge(defines, {
     BUNDLE_VERSION: versionInfo.version,
     BUNDLE_BUILD: versionInfo.commit,
-    TESTING:
-      defines.TESTING !== undefined
-        ? defines.TESTING
-        : process.env.TESTING === "true",
+    TESTING: defines.TESTING ?? process.env.TESTING === "true",
     DEFAULT_PREFERENCES: getDefaultPreferences(
       defines.SKIP_BABEL ? "lib/" : "lib-legacy/"
     ),
@@ -1566,7 +1557,12 @@ function buildLib(defines, dir) {
       { base: "src/" }
     ),
     gulp.src(
-      ["examples/node/domstubs.js", "web/*.js", "!web/{pdfjs,viewer}.js"],
+      [
+        "examples/node/domstubs.js",
+        "external/webL10n/l10n.js",
+        "web/*.js",
+        "!web/{pdfjs,viewer}.js",
+      ],
       { base: "." }
     ),
     gulp.src("test/unit/*.js", { base: "." }),

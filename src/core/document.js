@@ -13,8 +13,8 @@
  * limitations under the License.
  */
 
-import { AnnotationFactory, PopupAnnotation } from "./annotation.js";
 import {
+  AnnotationEditorPrefix,
   assert,
   FormatError,
   info,
@@ -30,6 +30,7 @@ import {
   Util,
   warn,
 } from "../shared/util.js";
+import { AnnotationFactory, PopupAnnotation } from "./annotation.js";
 import {
   collectActions,
   getInheritableProperty,
@@ -258,7 +259,7 @@ class Page {
     );
   }
 
-  #replaceIdByRef(annotations, deletedAnnotations) {
+  #replaceIdByRef(annotations, deletedAnnotations, existingAnnotations) {
     for (const annotation of annotations) {
       if (annotation.id) {
         const ref = Ref.fromString(annotation.id);
@@ -270,13 +271,14 @@ class Page {
           deletedAnnotations.put(ref);
           continue;
         }
+        existingAnnotations?.put(ref);
         annotation.ref = ref;
         delete annotation.id;
       }
     }
   }
 
-  async saveNewAnnotations(handler, task, annotations) {
+  async saveNewAnnotations(handler, task, annotations, imagePromises) {
     if (this.xfaFactory) {
       throw new Error("XFA: Cannot save new annotations.");
     }
@@ -295,7 +297,8 @@ class Page {
     });
 
     const deletedAnnotations = new RefSet();
-    this.#replaceIdByRef(annotations, deletedAnnotations);
+    const existingAnnotations = new RefSet();
+    this.#replaceIdByRef(annotations, deletedAnnotations, existingAnnotations);
 
     const pageDict = this.pageDict;
     const annotationsArray = this.annotations.filter(
@@ -304,11 +307,15 @@ class Page {
     const newData = await AnnotationFactory.saveNewAnnotations(
       partialEvaluator,
       task,
-      annotations
+      annotations,
+      imagePromises
     );
 
     for (const { ref } of newData.annotations) {
-      annotationsArray.push(ref);
+      // Don't add an existing annotation ref to the annotations array.
+      if (ref instanceof Ref && !existingAnnotations.has(ref)) {
+        annotationsArray.push(ref);
+      }
     }
 
     const savedDict = pageDict.get("Annots");
@@ -428,14 +435,52 @@ class Page {
 
     let newAnnotationsPromise = Promise.resolve(null);
     if (newAnnotationsByPage) {
+      let imagePromises;
       const newAnnotations = newAnnotationsByPage.get(this.pageIndex);
       if (newAnnotations) {
+        // An annotation can contain a reference to a bitmap, but this bitmap
+        // is defined in another annotation. So we need to find this annotation
+        // and generate the bitmap.
+        const missingBitmaps = new Set();
+        for (const { bitmapId, bitmap } of newAnnotations) {
+          if (bitmapId && !bitmap && !missingBitmaps.has(bitmapId)) {
+            missingBitmaps.add(bitmapId);
+          }
+        }
+
+        const { isOffscreenCanvasSupported } = this.evaluatorOptions;
+        if (missingBitmaps.size > 0) {
+          const annotationWithBitmaps = [];
+          for (const [key, annotation] of annotationStorage) {
+            if (!key.startsWith(AnnotationEditorPrefix)) {
+              continue;
+            }
+            if (annotation.bitmap && missingBitmaps.has(annotation.bitmapId)) {
+              annotationWithBitmaps.push(annotation);
+            }
+          }
+          // The array annotationWithBitmaps cannot be empty: the check above
+          // makes sure to have at least one annotation containing the bitmap.
+          imagePromises = AnnotationFactory.generateImages(
+            annotationWithBitmaps,
+            this.xref,
+            isOffscreenCanvasSupported
+          );
+        } else {
+          imagePromises = AnnotationFactory.generateImages(
+            newAnnotations,
+            this.xref,
+            isOffscreenCanvasSupported
+          );
+        }
+
         deletedAnnotations = new RefSet();
-        this.#replaceIdByRef(newAnnotations, deletedAnnotations);
+        this.#replaceIdByRef(newAnnotations, deletedAnnotations, null);
         newAnnotationsPromise = AnnotationFactory.printNewAnnotations(
           partialEvaluator,
           task,
-          newAnnotations
+          newAnnotations,
+          imagePromises
         );
       }
     }
@@ -1057,7 +1102,7 @@ class PDFDocument {
         const str = stringToUTF8String(stream.getString());
         const data = { [key]: str };
         return shadow(this, "xfaDatasets", new DatasetReader(data));
-      } catch (_) {
+      } catch {
         warn("XFA - Invalid utf-8 string.");
         break;
       }
@@ -1077,7 +1122,7 @@ class PDFDocument {
       }
       try {
         data[key] = stringToUTF8String(stream.getString());
-      } catch (_) {
+      } catch {
         warn("XFA - Invalid utf-8 string.");
         return null;
       }
@@ -1667,6 +1712,11 @@ class PDFDocument {
       } else {
         name = `${name}.${partName}`;
       }
+    }
+
+    if (!field.has("Kids") && /\[\d+\]$/.test(name)) {
+      // We've a terminal node: strip the index.
+      name = name.substring(0, name.lastIndexOf("["));
     }
 
     if (!promises.has(name)) {

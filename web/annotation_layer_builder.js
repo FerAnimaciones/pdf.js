@@ -129,12 +129,13 @@ class AnnotationLayerBuilder {
       div,
       accessibilityManager: this._accessibilityManager,
       annotationCanvasMap: this._annotationCanvasMap,
+      l10n: this.l10n,
+      page: this.pdfPage,
+      viewport: viewport.clone({ dontFlip: true }),
     });
 
-    this.annotationLayer.render({
-      viewport: viewport.clone({ dontFlip: true }),
+    await this.annotationLayer.render({
       annotations,
-      page: this.pdfPage,
       imageResourcesPath: this.imageResourcesPath,
       renderForms: this.renderForms,
       linkService: this.linkService,
@@ -144,7 +145,6 @@ class AnnotationLayerBuilder {
       hasJSActions,
       fieldObjects,
     });
-    this.l10n.translate(div);
 
     // Ensure that interactive form elements in the annotationLayer are
     // disabled while PresentationMode is active (see issue 12232).

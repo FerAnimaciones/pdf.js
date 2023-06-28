@@ -362,6 +362,8 @@ class AnnotationEditorUIManager {
 
   #currentPageIndex = 0;
 
+  #deletedAnnotationsElementIds = new Set();
+
   #editorTypes = null;
 
   #editorsToRescale = new Set();
@@ -553,8 +555,9 @@ class AnnotationEditorUIManager {
 
     const editors = [];
     for (const editor of this.#selectedEditors) {
-      if (!editor.isEmpty()) {
-        editors.push(editor.serialize());
+      const serialized = editor.serialize(/* isForCopying = */ true);
+      if (serialized) {
+        editors.push(serialized);
       }
     }
     if (editors.length === 0) {
@@ -862,7 +865,39 @@ class AnnotationEditorUIManager {
   removeEditor(editor) {
     this.#allEditors.delete(editor.id);
     this.unselect(editor);
-    this.#annotationStorage?.remove(editor.id);
+    if (
+      !editor.annotationElementId ||
+      !this.#deletedAnnotationsElementIds.has(editor.annotationElementId)
+    ) {
+      this.#annotationStorage?.remove(editor.id);
+    }
+  }
+
+  /**
+   * The annotation element with the given id has been deleted.
+   * @param {AnnotationEditor} editor
+   */
+  addDeletedAnnotationElement(editor) {
+    this.#deletedAnnotationsElementIds.add(editor.annotationElementId);
+    editor.deleted = true;
+  }
+
+  /**
+   * Check if the annotation element with the given id has been deleted.
+   * @param {string} annotationElementId
+   * @returns {boolean}
+   */
+  isDeletedAnnotationElement(annotationElementId) {
+    return this.#deletedAnnotationsElementIds.has(annotationElementId);
+  }
+
+  /**
+   * The annotation element with the given id have been restored.
+   * @param {AnnotationEditor} editor
+   */
+  removeDeletedAnnotationElement(editor) {
+    this.#deletedAnnotationsElementIds.delete(editor.annotationElementId);
+    editor.deleted = false;
   }
 
   /**
