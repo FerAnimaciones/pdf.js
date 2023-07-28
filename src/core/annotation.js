@@ -148,8 +148,7 @@ class AnnotationFactory {
       needAppearances:
         !collectFields && acroFormDict.get("NeedAppearances") === true,
       pageIndex,
-      isOffscreenCanvasSupported:
-        pdfManager.evaluatorOptions.isOffscreenCanvasSupported,
+      evaluatorOptions: pdfManager.evaluatorOptions,
     };
 
     switch (subtype) {
@@ -341,7 +340,7 @@ class AnnotationFactory {
               xref,
               annotation,
               dependencies,
-              image
+              { image }
             )
           );
           break;
@@ -364,8 +363,7 @@ class AnnotationFactory {
       return null;
     }
 
-    const xref = evaluator.xref;
-    const { isOffscreenCanvasSupported } = evaluator.options;
+    const { options, xref } = evaluator;
     const promises = [];
     for (const annotation of annotations) {
       if (annotation.deleted) {
@@ -377,19 +375,19 @@ class AnnotationFactory {
             FreeTextAnnotation.createNewPrintAnnotation(xref, annotation, {
               evaluator,
               task,
-              isOffscreenCanvasSupported,
+              evaluatorOptions: options,
             })
           );
           break;
         case AnnotationEditorType.INK:
           promises.push(
             InkAnnotation.createNewPrintAnnotation(xref, annotation, {
-              isOffscreenCanvasSupported,
+              evaluatorOptions: options,
             })
           );
           break;
         case AnnotationEditorType.STAMP:
-          if (!isOffscreenCanvasSupported) {
+          if (!options.isOffscreenCanvasSupported) {
             break;
           }
           const image = await imagePromises.get(annotation.bitmapId);
@@ -402,7 +400,10 @@ class AnnotationFactory {
             image.imageStream = image.smaskStream = null;
           }
           promises.push(
-            StampAnnotation.createNewPrintAnnotation(xref, annotation, image)
+            StampAnnotation.createNewPrintAnnotation(xref, annotation, {
+              image,
+              evaluatorOptions: options,
+            })
           );
           break;
       }
@@ -545,7 +546,7 @@ class Annotation {
 
     const MK = dict.get("MK");
     this.setBorderAndBackgroundColors(MK);
-    this.setRotation(MK);
+    this.setRotation(MK, dict);
     this.ref = params.ref instanceof Ref ? params.ref : null;
 
     this._streams = [];
@@ -600,7 +601,8 @@ class Annotation {
       this.data.pageIndex = params.pageIndex;
     }
 
-    this._isOffscreenCanvasSupported = params.isOffscreenCanvasSupported;
+    this._isOffscreenCanvasSupported =
+      params.evaluatorOptions.isOffscreenCanvasSupported;
     this._fallbackFontDict = null;
     this._needAppearances = false;
   }
@@ -782,11 +784,10 @@ class Annotation {
    * @param {Array} rectangle - The rectangle array with exactly four entries
    */
   setRectangle(rectangle) {
-    if (Array.isArray(rectangle) && rectangle.length === 4) {
-      this.rectangle = Util.normalizeRect(rectangle);
-    } else {
-      this.rectangle = [0, 0, 0, 0];
-    }
+    this.rectangle =
+      Array.isArray(rectangle) && rectangle.length === 4
+        ? Util.normalizeRect(rectangle)
+        : [0, 0, 0, 0];
   }
 
   /**
@@ -836,18 +837,16 @@ class Annotation {
     }
   }
 
-  setRotation(mk) {
+  setRotation(mk, dict) {
     this.rotation = 0;
-    if (mk instanceof Dict) {
-      let angle = mk.get("R") || 0;
-      if (Number.isInteger(angle) && angle !== 0) {
-        angle %= 360;
-        if (angle < 0) {
-          angle += 360;
-        }
-        if (angle % 90 === 0) {
-          this.rotation = angle;
-        }
+    let angle = mk instanceof Dict ? mk.get("R") || 0 : dict.get("Rotate") || 0;
+    if (Number.isInteger(angle) && angle !== 0) {
+      angle %= 360;
+      if (angle < 0) {
+        angle += 360;
+      }
+      if (angle % 90 === 0) {
+        this.rotation = angle;
       }
     }
   }
@@ -1067,6 +1066,7 @@ class Annotation {
 
     const text = [];
     const buffer = [];
+    let firstPosition = null;
     const sink = {
       desiredSize: Math.Infinity,
       ready: true,
@@ -1076,6 +1076,7 @@ class Annotation {
           if (item.str === undefined) {
             continue;
           }
+          firstPosition ||= item.transform.slice(-2);
           buffer.push(item.str);
           if (item.hasEOL) {
             text.push(buffer.join(""));
@@ -1100,6 +1101,17 @@ class Annotation {
     }
 
     if (text.length > 1 || text[0]) {
+      const appearanceDict = this.appearance.dict;
+      const bbox = appearanceDict.getArray("BBox") || [0, 0, 1, 1];
+      const matrix = appearanceDict.getArray("Matrix") || [1, 0, 0, 1, 0, 0];
+      const rect = this.data.rect;
+      const transform = getTransformMatrix(rect, bbox, matrix);
+      transform[4] -= rect[0];
+      transform[5] -= rect[1];
+      firstPosition = Util.applyTransform(firstPosition, transform);
+      firstPosition = Util.applyTransform(firstPosition, matrix);
+
+      this.data.textPosition = firstPosition;
       this.data.textContent = text;
     }
   }
@@ -1587,7 +1599,7 @@ class MarkupAnnotation extends Annotation {
     const newAnnotation = new this.prototype.constructor({
       dict: annotationDict,
       xref,
-      isOffscreenCanvasSupported: params.isOffscreenCanvasSupported,
+      evaluatorOptions: params.evaluatorOptions,
     });
 
     if (annotation.ref) {
@@ -1834,6 +1846,10 @@ class WidgetAnnotation extends Annotation {
       return { opList, separateForm: false, separateCanvas: false };
     }
 
+    const isUsingOwnCanvas = !!(
+      this.data.hasOwnCanvas && intent & RenderingIntentFlag.DISPLAY
+    );
+
     const matrix = [1, 0, 0, 1, 0, 0];
     const bbox = [
       0,
@@ -1859,7 +1875,7 @@ class WidgetAnnotation extends Annotation {
       this.data.rect,
       transform,
       this.getRotationMatrix(annotationStorage),
-      /* isUsingOwnCanvas = */ false,
+      isUsingOwnCanvas,
     ]);
 
     const stream = new StringStream(content);
@@ -1874,7 +1890,7 @@ class WidgetAnnotation extends Annotation {
     if (optionalContent !== undefined) {
       opList.addOp(OPS.endMarkedContent, []);
     }
-    return { opList, separateForm: false, separateCanvas: false };
+    return { opList, separateForm: false, separateCanvas: isUsingOwnCanvas };
   }
 
   _getMKDict(rotation) {
@@ -2550,7 +2566,7 @@ class TextWidgetAnnotation extends WidgetAnnotation {
   }
 
   get hasTextContent() {
-    return !!this.appearance;
+    return !!this.appearance && !this._needAppearances;
   }
 
   _getCombAppearance(
@@ -2676,24 +2692,22 @@ class TextWidgetAnnotation extends WidgetAnnotation {
           lastSpacePosInStringEnd = end;
           lastSpacePos = i;
         }
-      } else {
-        if (currentWidth + glyphWidth > width) {
-          // We must break to the last white position (if available)
-          if (lastSpacePosInStringStart !== -1) {
-            chunks.push(line.substring(startChunk, lastSpacePosInStringEnd));
-            startChunk = lastSpacePosInStringEnd;
-            i = lastSpacePos + 1;
-            lastSpacePosInStringStart = -1;
-            currentWidth = 0;
-          } else {
-            // Just break in the middle of the word
-            chunks.push(line.substring(startChunk, start));
-            startChunk = start;
-            currentWidth = glyphWidth;
-          }
+      } else if (currentWidth + glyphWidth > width) {
+        // We must break to the last white position (if available)
+        if (lastSpacePosInStringStart !== -1) {
+          chunks.push(line.substring(startChunk, lastSpacePosInStringEnd));
+          startChunk = lastSpacePosInStringEnd;
+          i = lastSpacePos + 1;
+          lastSpacePosInStringStart = -1;
+          currentWidth = 0;
         } else {
-          currentWidth += glyphWidth;
+          // Just break in the middle of the word
+          chunks.push(line.substring(startChunk, start));
+          startChunk = start;
+          currentWidth = glyphWidth;
         }
+      } else {
+        currentWidth += glyphWidth;
       }
     }
 
@@ -2795,11 +2809,9 @@ class ButtonWidgetAnnotation extends WidgetAnnotation {
     if (value === null || value === undefined) {
       // There is no default appearance so use the one derived
       // from the field value.
-      if (this.data.checkBox) {
-        value = this.data.fieldValue === this.data.exportValue;
-      } else {
-        value = this.data.fieldValue === this.data.buttonValue;
-      }
+      value = this.data.checkBox
+        ? this.data.fieldValue === this.data.exportValue
+        : this.data.fieldValue === this.data.buttonValue;
     }
 
     const appearance = value
@@ -3590,11 +3602,10 @@ class PopupAnnotation extends Annotation {
     }
 
     const parentRect = parentItem.getArray("Rect");
-    if (Array.isArray(parentRect) && parentRect.length === 4) {
-      this.data.parentRect = Util.normalizeRect(parentRect);
-    } else {
-      this.data.parentRect = null;
-    }
+    this.data.parentRect =
+      Array.isArray(parentRect) && parentRect.length === 4
+        ? Util.normalizeRect(parentRect)
+        : null;
 
     const rt = parentItem.get("RT");
     if (isName(rt, AnnotationReplyType.GROUP)) {
@@ -3648,11 +3659,15 @@ class FreeTextAnnotation extends MarkupAnnotation {
 
     this.data.hasOwnCanvas = true;
 
-    const { xref } = params;
+    const { evaluatorOptions, xref } = params;
     this.data.annotationType = AnnotationType.FREETEXT;
     this.setDefaultAppearance(params);
     if (this.appearance) {
-      const { fontColor, fontSize } = parseAppearanceStream(this.appearance);
+      const { fontColor, fontSize } = parseAppearanceStream(
+        this.appearance,
+        evaluatorOptions,
+        xref
+      );
       this.data.defaultAppearanceData.fontColor = fontColor;
       this.data.defaultAppearanceData.fontSize = fontSize || 10;
     } else if (this._isOffscreenCanvasSupported) {
@@ -3743,7 +3758,7 @@ class FreeTextAnnotation extends MarkupAnnotation {
       evaluator,
       task,
       {
-        fontName: "Helvetica",
+        fontName: "Helv",
         fontSize,
       },
       resources
@@ -3783,26 +3798,52 @@ class FreeTextAnnotation extends MarkupAnnotation {
     }
     let vscale = 1;
     const lineHeight = LINE_FACTOR * fontSize;
-    const lineDescent = LINE_DESCENT_FACTOR * fontSize;
+    const lineAscent = (LINE_FACTOR - LINE_DESCENT_FACTOR) * fontSize;
     const totalHeight = lineHeight * lines.length;
     if (totalHeight > h) {
       vscale = h / totalHeight;
     }
     const fscale = Math.min(hscale, vscale);
     const newFontSize = fontSize * fscale;
+    let firstPoint, clipBox, matrix;
+    switch (rotation) {
+      case 0:
+        matrix = [1, 0, 0, 1];
+        clipBox = [rect[0], rect[1], w, h];
+        firstPoint = [rect[0], rect[3] - lineAscent];
+        break;
+      case 90:
+        matrix = [0, 1, -1, 0];
+        clipBox = [rect[1], -rect[2], w, h];
+        firstPoint = [rect[1], -rect[0] - lineAscent];
+        break;
+      case 180:
+        matrix = [-1, 0, 0, -1];
+        clipBox = [-rect[2], -rect[3], w, h];
+        firstPoint = [-rect[2], -rect[1] - lineAscent];
+        break;
+      case 270:
+        matrix = [0, -1, 1, 0];
+        clipBox = [-rect[3], rect[0], w, h];
+        firstPoint = [-rect[3], rect[2] - lineAscent];
+        break;
+    }
+
     const buffer = [
       "q",
-      `0 0 ${numberToString(w)} ${numberToString(h)} re W n`,
+      `${matrix.join(" ")} 0 0 cm`,
+      `${clipBox.join(" ")} re W n`,
       `BT`,
-      `1 0 0 1 0 ${numberToString(h + lineDescent)} Tm 0 Tc ${getPdfColor(
-        color,
-        /* isFill */ true
-      )}`,
-      `/Helv ${numberToString(newFontSize)} Tf`,
+      `${getPdfColor(color, /* isFill */ true)}`,
+      `0 Tc /Helv ${numberToString(newFontSize)} Tf`,
     ];
 
+    buffer.push(
+      `${firstPoint.join(" ")} Td (${escapeString(encodedLines[0])}) Tj`
+    );
     const vShift = numberToString(lineHeight);
-    for (const line of encodedLines) {
+    for (let i = 1, ii = encodedLines.length; i < ii; i++) {
+      const line = encodedLines[i];
       buffer.push(`0 -${vShift} Td (${escapeString(line)}) Tj`);
     }
     buffer.push("ET", "Q");
@@ -3812,13 +3853,9 @@ class FreeTextAnnotation extends MarkupAnnotation {
     appearanceStreamDict.set("FormType", 1);
     appearanceStreamDict.set("Subtype", Name.get("Form"));
     appearanceStreamDict.set("Type", Name.get("XObject"));
-    appearanceStreamDict.set("BBox", [0, 0, w, h]);
+    appearanceStreamDict.set("BBox", rect);
     appearanceStreamDict.set("Resources", resources);
-
-    if (rotation) {
-      const matrix = getRotationMatrix(rotation, w, h);
-      appearanceStreamDict.set("Matrix", matrix);
-    }
+    appearanceStreamDict.set("Matrix", [1, 0, 0, 1, -rect[0], -rect[1]]);
 
     const ap = new StringStream(appearance);
     ap.dict = appearanceStreamDict;
@@ -4548,7 +4585,7 @@ class StampAnnotation extends MarkupAnnotation {
 
   static async createNewAppearanceStream(annotation, xref, params) {
     const { rotation } = annotation;
-    const { imageRef, width, height } = params;
+    const { imageRef, width, height } = params.image;
     const resources = new Dict(xref);
     const xobject = new Dict(xref);
     resources.set("XObject", xobject);

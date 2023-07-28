@@ -12,16 +12,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+/* globals process */
 
-// Skip compatibility checks for modern builds and if we already ran the module.
-if (
-  typeof PDFJSDev !== "undefined" &&
-  !PDFJSDev.test("SKIP_BABEL") &&
-  !globalThis._pdfjsCompatibilityChecked
-) {
-  globalThis._pdfjsCompatibilityChecked = true;
-  require("./compatibility.js");
-}
+// NW.js / Electron is a browser context, but copies some Node.js objects; see
+// http://docs.nwjs.io/en/latest/For%20Users/Advanced/JavaScript%20Contexts%20in%20NW.js/#access-nodejs-and-nwjs-api-in-browser-context
+// https://www.electronjs.org/docs/api/process#processversionselectron-readonly
+// https://www.electronjs.org/docs/api/process#processtype-readonly
+const isNodeJS =
+  (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) &&
+  typeof process === "object" &&
+  process + "" === "[object process]" &&
+  !process.versions.nw &&
+  !(process.versions.electron && process.type && process.type !== "browser");
 
 const IDENTITY_MATRIX = [1, 0, 0, 1, 0, 0];
 const FONT_IDENTITY_MATRIX = [0.001, 0, 0, 0.001, 0, 0];
@@ -75,12 +77,13 @@ const AnnotationEditorType = {
 };
 
 const AnnotationEditorParamsType = {
-  FREETEXT_SIZE: 1,
-  FREETEXT_COLOR: 2,
-  FREETEXT_OPACITY: 3,
-  INK_COLOR: 11,
-  INK_THICKNESS: 12,
-  INK_OPACITY: 13,
+  RESIZE: 1,
+  FREETEXT_SIZE: 11,
+  FREETEXT_COLOR: 12,
+  FREETEXT_OPACITY: 13,
+  INK_COLOR: 21,
+  INK_THICKNESS: 22,
+  INK_OPACITY: 23,
 };
 
 // Permission flags from Table 22, Section 7.6.3.2 of the PDF specification.
@@ -1014,6 +1017,27 @@ function normalizeUnicode(str) {
   });
 }
 
+function getUuid() {
+  if (
+    (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) ||
+    (typeof crypto !== "undefined" && typeof crypto?.randomUUID === "function")
+  ) {
+    return crypto.randomUUID();
+  }
+  const buf = new Uint8Array(32);
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto?.getRandomValues === "function"
+  ) {
+    crypto.getRandomValues(buf);
+  } else {
+    for (let i = 0; i < 32; i++) {
+      buf[i] = Math.floor(Math.random() * 255);
+    }
+  }
+  return bytesToString(buf);
+}
+
 export {
   AbortException,
   AnnotationActionEventType,
@@ -1037,6 +1061,7 @@ export {
   FONT_IDENTITY_MATRIX,
   FormatError,
   getModificationDate,
+  getUuid,
   getVerbosityLevel,
   IDENTITY_MATRIX,
   ImageKind,
@@ -1044,6 +1069,7 @@ export {
   InvalidPDFException,
   isArrayBuffer,
   isArrayEqual,
+  isNodeJS,
   LINE_DESCENT_FACTOR,
   LINE_FACTOR,
   MAX_IMAGE_SIZE_TO_CACHE,

@@ -46,7 +46,6 @@ import {
   isPdfFile,
   loadScript,
   MissingPDFException,
-  OPS,
   PDFWorker,
   PromiseCapability,
   shadow,
@@ -375,7 +374,7 @@ const PDFViewerApplication = {
       const enabled = params.get("pdfbug").split(",");
       try {
         await loadPDFBug(this);
-        this._PDFBug.init({ OPS }, mainContainer, enabled);
+        this._PDFBug.init(mainContainer, enabled);
       } catch (ex) {
         console.error(`_parseHashParams: "${ex.message}".`);
       }
@@ -495,6 +494,9 @@ const PDFViewerApplication = {
     const container = appConfig.mainContainer,
       viewer = appConfig.viewerContainer;
     const annotationEditorMode = AppOptions.get("annotationEditorMode");
+    const isOffscreenCanvasSupported =
+      AppOptions.get("isOffscreenCanvasSupported") &&
+      FeatureTest.isOffscreenCanvasSupported;
     const pageColors =
       AppOptions.get("forcePageColors") ||
       window.matchMedia("(forced-colors: active)").matches
@@ -521,7 +523,7 @@ const PDFViewerApplication = {
       imageResourcesPath: AppOptions.get("imageResourcesPath"),
       enablePrintAutoRotate: AppOptions.get("enablePrintAutoRotate"),
       useOnlyCssZoom: AppOptions.get("useOnlyCssZoom"),
-      isOffscreenCanvasSupported: AppOptions.get("isOffscreenCanvasSupported"),
+      isOffscreenCanvasSupported,
       maxCanvasPixels: AppOptions.get("maxCanvasPixels"),
       enablePermissions: AppOptions.get("enablePermissions"),
       pageColors,
@@ -560,6 +562,10 @@ const PDFViewerApplication = {
 
     if (appConfig.annotationEditorParams) {
       if (annotationEditorMode !== AnnotationEditorType.DISABLE) {
+        if (AppOptions.get("enableStampEditor") && isOffscreenCanvasSupported) {
+          appConfig.toolbar?.editorStampButton?.classList.remove("hidden");
+        }
+
         this.annotationEditorParams = new AnnotationEditorParams(
           appConfig.annotationEditorParams,
           eventBus
@@ -685,8 +691,107 @@ const PDFViewerApplication = {
     }
   },
 
-  run(config) {
-    this.initialize(config).then(webViewerInitialized);
+  async run(config) {
+    await this.initialize(config);
+
+    const { appConfig, eventBus, l10n } = this;
+    let file;
+    if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
+      const queryString = document.location.search.substring(1);
+      const params = parseQueryString(queryString);
+      file = params.get("file") ?? AppOptions.get("defaultUrl");
+      validateFileURL(file);
+    } else if (PDFJSDev.test("MOZCENTRAL")) {
+      file = window.location.href;
+    } else if (PDFJSDev.test("CHROME")) {
+      file = AppOptions.get("defaultUrl");
+    }
+
+    if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
+      const fileInput = appConfig.openFileInput;
+      fileInput.value = null;
+
+      fileInput.addEventListener("change", function (evt) {
+        const { files } = evt.target;
+        if (!files || files.length === 0) {
+          return;
+        }
+        eventBus.dispatch("fileinputchange", {
+          source: this,
+          fileInput: evt.target,
+        });
+      });
+
+      // Enable dragging-and-dropping a new PDF file onto the viewerContainer.
+      appConfig.mainContainer.addEventListener("dragover", function (evt) {
+        evt.preventDefault();
+
+        evt.dataTransfer.dropEffect =
+          evt.dataTransfer.effectAllowed === "copy" ? "copy" : "move";
+      });
+      appConfig.mainContainer.addEventListener("drop", function (evt) {
+        evt.preventDefault();
+
+        const { files } = evt.dataTransfer;
+        if (!files || files.length === 0) {
+          return;
+        }
+        eventBus.dispatch("fileinputchange", {
+          source: this,
+          fileInput: evt.dataTransfer,
+        });
+      });
+    }
+
+    if (!this.supportsDocumentFonts) {
+      AppOptions.set("disableFontFace", true);
+      l10n.get("web_fonts_disabled").then(msg => {
+        console.warn(msg);
+      });
+    }
+
+    if (!this.supportsPrinting) {
+      appConfig.toolbar?.print?.classList.add("hidden");
+      appConfig.secondaryToolbar?.printButton.classList.add("hidden");
+    }
+
+    if (!this.supportsFullscreen) {
+      appConfig.secondaryToolbar?.presentationModeButton.classList.add(
+        "hidden"
+      );
+    }
+
+    if (this.supportsIntegratedFind) {
+      appConfig.toolbar?.viewFind?.classList.add("hidden");
+    }
+
+    appConfig.mainContainer.addEventListener(
+      "transitionend",
+      function (evt) {
+        if (evt.target === /* mainContainer */ this) {
+          eventBus.dispatch("resize", { source: this });
+        }
+      },
+      true
+    );
+
+    try {
+      if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
+        if (file) {
+          this.open({ url: file });
+        } else {
+          this._hideViewBookmark();
+        }
+      } else if (PDFJSDev.test("MOZCENTRAL || CHROME")) {
+        this.initPassiveLoading(file);
+      } else {
+        throw new Error("Not implemented: run");
+      }
+    } catch (reason) {
+      l10n.get("loading_error").then(msg => {
+        this._documentError(msg, reason);
+      });
+    }
   },
 
   get initialized() {
@@ -768,13 +873,15 @@ const PDFViewerApplication = {
     return this.externalServices.supportedMouseWheelZoomModifierKeys;
   },
 
-  initPassiveLoading() {
+  initPassiveLoading(file) {
     if (
       typeof PDFJSDev === "undefined" ||
       !PDFJSDev.test("MOZCENTRAL || CHROME")
     ) {
       throw new Error("Not implemented: initPassiveLoading");
     }
+    this.setTitleUsingUrl(file, /* downloadUrl = */ file);
+
     this.externalServices.initPassiveLoading({
       onOpenWithTransport: range => {
         this.open({ range });
@@ -2197,106 +2304,6 @@ function reportPageStatsPDFBug({ pageNumber }) {
   globalThis.Stats.add(pageNumber, pageView?.pdfPage?.stats);
 }
 
-function webViewerInitialized() {
-  const { appConfig, eventBus, l10n } = PDFViewerApplication;
-  let file;
-  if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
-    const queryString = document.location.search.substring(1);
-    const params = parseQueryString(queryString);
-    file = params.get("file") ?? AppOptions.get("defaultUrl");
-    validateFileURL(file);
-  } else if (PDFJSDev.test("MOZCENTRAL")) {
-    file = window.location.href;
-  } else if (PDFJSDev.test("CHROME")) {
-    file = AppOptions.get("defaultUrl");
-  }
-
-  if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
-    const fileInput = appConfig.openFileInput;
-    fileInput.value = null;
-
-    fileInput.addEventListener("change", function (evt) {
-      const { files } = evt.target;
-      if (!files || files.length === 0) {
-        return;
-      }
-      eventBus.dispatch("fileinputchange", {
-        source: this,
-        fileInput: evt.target,
-      });
-    });
-
-    // Enable dragging-and-dropping a new PDF file onto the viewerContainer.
-    appConfig.mainContainer.addEventListener("dragover", function (evt) {
-      evt.preventDefault();
-
-      evt.dataTransfer.dropEffect =
-        evt.dataTransfer.effectAllowed === "copy" ? "copy" : "move";
-    });
-    appConfig.mainContainer.addEventListener("drop", function (evt) {
-      evt.preventDefault();
-
-      const { files } = evt.dataTransfer;
-      if (!files || files.length === 0) {
-        return;
-      }
-      eventBus.dispatch("fileinputchange", {
-        source: this,
-        fileInput: evt.dataTransfer,
-      });
-    });
-  }
-
-  if (!PDFViewerApplication.supportsDocumentFonts) {
-    AppOptions.set("disableFontFace", true);
-    l10n.get("web_fonts_disabled").then(msg => {
-      console.warn(msg);
-    });
-  }
-
-  if (!PDFViewerApplication.supportsPrinting) {
-    appConfig.toolbar?.print?.classList.add("hidden");
-    appConfig.secondaryToolbar?.printButton.classList.add("hidden");
-  }
-
-  if (!PDFViewerApplication.supportsFullscreen) {
-    appConfig.secondaryToolbar?.presentationModeButton.classList.add("hidden");
-  }
-
-  if (PDFViewerApplication.supportsIntegratedFind) {
-    appConfig.toolbar?.viewFind?.classList.add("hidden");
-  }
-
-  appConfig.mainContainer.addEventListener(
-    "transitionend",
-    function (evt) {
-      if (evt.target === /* mainContainer */ this) {
-        eventBus.dispatch("resize", { source: this });
-      }
-    },
-    true
-  );
-
-  try {
-    if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
-      if (file) {
-        PDFViewerApplication.open({ url: file });
-      } else {
-        PDFViewerApplication._hideViewBookmark();
-      }
-    } else if (PDFJSDev.test("MOZCENTRAL || CHROME")) {
-      PDFViewerApplication.setTitleUsingUrl(file, /* downloadUrl = */ file);
-      PDFViewerApplication.initPassiveLoading();
-    } else {
-      throw new Error("Not implemented: webViewerInitialized");
-    }
-  } catch (reason) {
-    l10n.get("loading_error").then(msg => {
-      PDFViewerApplication._documentError(msg, reason);
-    });
-  }
-}
-
 function webViewerPageRender({ pageNumber }) {
   // If the page is (the most) visible when it starts rendering,
   // ensure that the page number input loading indicator is displayed.
@@ -2507,7 +2514,7 @@ function webViewerPresentationMode() {
   PDFViewerApplication.requestPresentationMode();
 }
 function webViewerSwitchAnnotationEditorMode(evt) {
-  PDFViewerApplication.pdfViewer.annotationEditorMode = evt.mode;
+  PDFViewerApplication.pdfViewer.annotationEditorMode = evt;
 }
 function webViewerSwitchAnnotationEditorParams(evt) {
   PDFViewerApplication.pdfViewer.annotationEditorParams = evt;

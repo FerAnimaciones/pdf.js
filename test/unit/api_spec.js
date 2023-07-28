@@ -19,6 +19,7 @@ import {
   AnnotationType,
   ImageKind,
   InvalidPDFException,
+  isNodeJS,
   MissingPDFException,
   objectSize,
   OPS,
@@ -50,11 +51,9 @@ import {
   RenderingCancelledException,
   StatTimer,
 } from "../../src/display/display_utils.js";
-import { AnnotationStorage } from "../../src/display/annotation_storage.js";
 import { AutoPrintRegExp } from "../../web/ui_utils.js";
 import { GlobalImageCache } from "../../src/core/image_utils.js";
 import { GlobalWorkerOptions } from "../../src/display/worker_options.js";
-import { isNodeJS } from "../../src/shared/is_node.js";
 import { Metadata } from "../../src/display/metadata.js";
 
 describe("api", function () {
@@ -2428,13 +2427,13 @@ describe("api", function () {
           docBaseUrl: "http://www.example.com/test/pdfs/qwerty.pdf",
         })
       );
-      const docBaseUrlPromise = docBaseUrlLoadingTask.promise.then(function (
-        pdfDoc
-      ) {
-        return pdfDoc.getPage(1).then(function (pdfPage) {
-          return pdfPage.getAnnotations();
-        });
-      });
+      const docBaseUrlPromise = docBaseUrlLoadingTask.promise.then(
+        function (pdfDoc) {
+          return pdfDoc.getPage(1).then(function (pdfPage) {
+            return pdfPage.getAnnotations();
+          });
+        }
+      );
 
       const invalidDocBaseUrlLoadingTask = getDocument(
         buildGetDocumentParams(filename, {
@@ -3525,12 +3524,8 @@ Caron Broadcasting, Inc., an Ohio corporation (“Lessee”).`)
       // Update the contents of the form-field again.
       annotationStorage.setValue("22R", { value: "Printing again..." });
 
-      const annotationHash = AnnotationStorage.getHash(
-        annotationStorage.serializable
-      );
-      const printAnnotationHash = AnnotationStorage.getHash(
-        printAnnotationStorage.serializable
-      );
+      const { hash: annotationHash } = annotationStorage.serializable;
+      const { hash: printAnnotationHash } = printAnnotationStorage.serializable;
       // Sanity check to ensure that the print-storage didn't change,
       // after the form-field was updated.
       expect(printAnnotationHash).not.toEqual(annotationHash);

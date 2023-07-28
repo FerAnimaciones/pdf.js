@@ -28,6 +28,7 @@ import { bindEvents } from "./tools.js";
 import { FreeTextEditor } from "./freetext.js";
 import { InkEditor } from "./ink.js";
 import { setLayerDimensions } from "../display_utils.js";
+import { StampEditor } from "./stamp.js";
 
 /**
  * @typedef {Object} AnnotationEditorLayerOptions
@@ -39,6 +40,7 @@ import { setLayerDimensions } from "../display_utils.js";
  * @property {number} pageIndex
  * @property {IL10n} l10n
  * @property {AnnotationLayer} [annotationLayer]
+ * @property {PageViewport} viewport
  */
 
 /**
@@ -75,20 +77,30 @@ class AnnotationEditorLayer {
   /**
    * @param {AnnotationEditorLayerOptions} options
    */
-  constructor(options) {
+  constructor({
+    uiManager,
+    pageIndex,
+    div,
+    accessibilityManager,
+    annotationLayer,
+    viewport,
+    l10n,
+  }) {
+    const editorTypes = [FreeTextEditor, InkEditor, StampEditor];
     if (!AnnotationEditorLayer._initialized) {
       AnnotationEditorLayer._initialized = true;
-      FreeTextEditor.initialize(options.l10n);
-      InkEditor.initialize(options.l10n);
+      for (const editorType of editorTypes) {
+        editorType.initialize(l10n);
+      }
     }
-    options.uiManager.registerEditorTypes([FreeTextEditor, InkEditor]);
+    uiManager.registerEditorTypes(editorTypes);
 
-    this.#uiManager = options.uiManager;
-    this.pageIndex = options.pageIndex;
-    this.div = options.div;
-    this.#accessibilityManager = options.accessibilityManager;
-    this.#annotationLayer = options.annotationLayer;
-    this.viewport = options.viewport;
+    this.#uiManager = uiManager;
+    this.pageIndex = pageIndex;
+    this.div = div;
+    this.#accessibilityManager = accessibilityManager;
+    this.#annotationLayer = annotationLayer;
+    this.viewport = viewport;
 
     this.#uiManager.addLayer(this);
   }
@@ -128,6 +140,10 @@ class AnnotationEditorLayer {
       this.div.classList.toggle(
         "inkEditing",
         mode === AnnotationEditorType.INK
+      );
+      this.div.classList.toggle(
+        "stampEditing",
+        mode === AnnotationEditorType.STAMP
       );
       this.div.hidden = false;
     }
@@ -391,6 +407,21 @@ class AnnotationEditorLayer {
   }
 
   /**
+   * Add a new editor and make this addition undoable.
+   * @param {AnnotationEditor} editor
+   */
+  addUndoableEditor(editor) {
+    const cmd = () => {
+      this.addOrRebuild(editor);
+    };
+    const undo = () => {
+      editor.remove();
+    };
+
+    this.addCommands({ cmd, undo, mustExec: false });
+  }
+
+  /**
    * Get an id for an editor.
    * @returns {string}
    */
@@ -409,6 +440,8 @@ class AnnotationEditorLayer {
         return new FreeTextEditor(params);
       case AnnotationEditorType.INK:
         return new InkEditor(params);
+      case AnnotationEditorType.STAMP:
+        return new StampEditor(params);
     }
     return null;
   }
@@ -424,6 +457,8 @@ class AnnotationEditorLayer {
         return FreeTextEditor.deserialize(data, this, this.#uiManager);
       case AnnotationEditorType.INK:
         return InkEditor.deserialize(data, this, this.#uiManager);
+      case AnnotationEditorType.STAMP:
+        return StampEditor.deserialize(data, this, this.#uiManager);
     }
     return null;
   }
@@ -518,6 +553,15 @@ class AnnotationEditorLayer {
    * @param {PointerEvent} event
    */
   pointerdown(event) {
+    if (this.#hadPointerDown) {
+      // It's possible to have a second pointerdown event before a pointerup one
+      // when the user puts a finger on a touchscreen and then add a second one
+      // to start a pinch-to-zoom gesture.
+      // That said, in case it's possible to have two pointerdown events with
+      // a mouse, we don't want to create a new editor in such a case either.
+      this.#hadPointerDown = false;
+      return;
+    }
     const { isMac } = FeatureTest.platform;
     if (event.button !== 0 || (event.ctrlKey && isMac)) {
       // Do nothing on right click.
