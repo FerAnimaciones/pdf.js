@@ -69,24 +69,22 @@ const DEFAULT_RANGE_CHUNK_SIZE = 65536; // 2^16 = 65536
 const RENDERING_CANCELLED_TIMEOUT = 100; // ms
 const DELAYED_CLEANUP_TIMEOUT = 5000; // ms
 
-let DefaultCanvasFactory = DOMCanvasFactory;
-let DefaultCMapReaderFactory = DOMCMapReaderFactory;
-let DefaultFilterFactory = DOMFilterFactory;
-let DefaultStandardFontDataFactory = DOMStandardFontDataFactory;
-
-if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("GENERIC") && isNodeJS) {
-  const {
-    NodeCanvasFactory,
-    NodeCMapReaderFactory,
-    NodeFilterFactory,
-    NodeStandardFontDataFactory,
-  } = require("./node_utils.js");
-
-  DefaultCanvasFactory = NodeCanvasFactory;
-  DefaultCMapReaderFactory = NodeCMapReaderFactory;
-  DefaultFilterFactory = NodeFilterFactory;
-  DefaultStandardFontDataFactory = NodeStandardFontDataFactory;
-}
+const DefaultCanvasFactory =
+  typeof PDFJSDev !== "undefined" && PDFJSDev.test("GENERIC") && isNodeJS
+    ? require("./node_utils.js").NodeCanvasFactory
+    : DOMCanvasFactory;
+const DefaultCMapReaderFactory =
+  typeof PDFJSDev !== "undefined" && PDFJSDev.test("GENERIC") && isNodeJS
+    ? require("./node_utils.js").NodeCMapReaderFactory
+    : DOMCMapReaderFactory;
+const DefaultFilterFactory =
+  typeof PDFJSDev !== "undefined" && PDFJSDev.test("GENERIC") && isNodeJS
+    ? require("./node_utils.js").NodeFilterFactory
+    : DOMFilterFactory;
+const DefaultStandardFontDataFactory =
+  typeof PDFJSDev !== "undefined" && PDFJSDev.test("GENERIC") && isNodeJS
+    ? require("./node_utils.js").NodeStandardFontDataFactory
+    : DOMStandardFontDataFactory;
 
 let createPDFNetworkStream;
 if (typeof PDFJSDev === "undefined") {
@@ -525,7 +523,7 @@ function getUrlProp(val) {
   try {
     // The full path is required in the 'url' field.
     return new URL(val, window.location).href;
-  } catch (ex) {
+  } catch {
     if (
       typeof PDFJSDev !== "undefined" &&
       PDFJSDev.test("GENERIC") &&
@@ -780,6 +778,11 @@ class PDFDocumentProxy {
       Object.defineProperty(this, "getXRefPrevValue", {
         value: () => {
           return this._transport.getXRefPrevValue();
+        },
+      });
+      Object.defineProperty(this, "getAnnotArray", {
+        value: pageIndex => {
+          return this._transport.getAnnotArray(pageIndex);
         },
       });
     }
@@ -1526,7 +1529,7 @@ class PDFPageProxy {
       optionalContentConfigPromise,
     ])
       .then(([transparency, optionalContentConfig]) => {
-        if (this.#pendingCleanup) {
+        if (this.destroyed) {
           complete();
           return;
         }
@@ -1554,6 +1557,9 @@ class PDFPageProxy {
     annotationMode = AnnotationMode.ENABLE,
     printAnnotationStorage = null,
   } = {}) {
+    if (typeof PDFJSDev !== "undefined" && !PDFJSDev.test("GENERIC")) {
+      throw new Error("Not implemented: getOperatorList");
+    }
     function operatorListChanged() {
       if (intentState.operatorList.lastChunk) {
         intentState.opListReadCapability.resolve(intentState.operatorList);
@@ -1729,7 +1735,7 @@ class PDFPageProxy {
   #tryCleanup(delayed = false) {
     this.#abortDelayedCleanup();
 
-    if (!this.#pendingCleanup) {
+    if (!this.#pendingCleanup || this.destroyed) {
       return false;
     }
     if (delayed) {
@@ -2013,7 +2019,7 @@ if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
       if (!base.origin || base.origin === "null") {
         return false; // non-HTTP url
       }
-    } catch (e) {
+    } catch {
       return false;
     }
 
@@ -2189,7 +2195,7 @@ class PDFWorker {
           }
           try {
             sendTest();
-          } catch (e) {
+          } catch {
             // We need fallback to a faked worker.
             this._setupFakeWorker();
           }
@@ -2206,7 +2212,7 @@ class PDFWorker {
         // The worker shall process only the first received "test" message.
         sendTest();
         return;
-      } catch (e) {
+      } catch {
         info("The worker has been disabled.");
       }
     }
@@ -2307,7 +2313,7 @@ class PDFWorker {
   static get _mainThreadWorkerMessageHandler() {
     try {
       return globalThis.pdfjsWorker?.WorkerMessageHandler || null;
-    } catch (ex) {
+    } catch {
       return null;
     }
   }
@@ -2402,6 +2408,13 @@ class WorkerTransport {
       Object.defineProperty(this, "getXRefPrevValue", {
         value: () => {
           return this.messageHandler.sendWithPromise("GetXRefPrevValue", null);
+        },
+      });
+      Object.defineProperty(this, "getAnnotArray", {
+        value: pageIndex => {
+          return this.messageHandler.sendWithPromise("GetAnnotArray", {
+            pageIndex,
+          });
         },
       });
     }
@@ -3349,7 +3362,6 @@ class InternalRenderTask {
       error ||
         new RenderingCancelledException(
           `Rendering cancelled, page ${this._pageIndex + 1}`,
-          "canvas",
           extraDelay
         )
     );
