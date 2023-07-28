@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-exports.loadAndWait = (filename, selector) =>
+exports.loadAndWait = (filename, selector, zoom, pageSetup) =>
   Promise.all(
     global.integrationSessions.map(async session => {
       const page = await session.browser.newPage();
@@ -33,9 +33,15 @@ exports.loadAndWait = (filename, selector) =>
         });
       });
 
-      await page.goto(
-        `${global.integrationBaseUrl}?file=/test/pdfs/${filename}`
-      );
+      let url = `${global.integrationBaseUrl}?file=/test/pdfs/${filename}`;
+      if (zoom) {
+        url += `#zoom=${zoom}`;
+      }
+      await page.goto(url);
+      if (pageSetup) {
+        await pageSetup(page);
+      }
+
       await page.bringToFront();
       await page.waitForSelector(selector, {
         timeout: 0,
@@ -135,11 +141,19 @@ const mockClipboard = async pages => {
 };
 exports.mockClipboard = mockClipboard;
 
-const getSerialized = page =>
-  page.evaluate(() => [
-    ...window.PDFViewerApplication.pdfDocument.annotationStorage.serializable.values(),
-  ]);
+async function getSerialized(page, filter = undefined) {
+  const values = await page.evaluate(() => {
+    const { map } =
+      window.PDFViewerApplication.pdfDocument.annotationStorage.serializable;
+    return map ? [...map.values()] : [];
+  });
+  return filter ? values.map(filter) : values;
+}
 exports.getSerialized = getSerialized;
+
+const getFirstSerialized = async (page, filter = undefined) =>
+  (await getSerialized(page, filter))[0];
+exports.getFirstSerialized = getFirstSerialized;
 
 function getEditors(page, kind) {
   return page.evaluate(aKind => {
@@ -152,3 +166,30 @@ function getEditors(page, kind) {
   }, kind);
 }
 exports.getEditors = getEditors;
+
+function getEditorDimensions(page, id) {
+  return page.evaluate(n => {
+    const element = document.getElementById(`pdfjs_internal_editor_${n}`);
+    const { style } = element;
+    return {
+      left: style.left,
+      top: style.top,
+      width: style.width,
+      height: style.height,
+    };
+  }, id);
+}
+exports.getEditorDimensions = getEditorDimensions;
+
+function serializeBitmapDimensions(page) {
+  return page.evaluate(() => {
+    const { map } =
+      window.PDFViewerApplication.pdfDocument.annotationStorage.serializable;
+    return map
+      ? Array.from(map.values(), x => {
+          return { width: x.bitmap.width, height: x.bitmap.height };
+        })
+      : [];
+  });
+}
+exports.serializeBitmapDimensions = serializeBitmapDimensions;
