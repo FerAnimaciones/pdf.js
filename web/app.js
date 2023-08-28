@@ -522,7 +522,6 @@ const PDFViewerApplication = {
       annotationEditorMode,
       imageResourcesPath: AppOptions.get("imageResourcesPath"),
       enablePrintAutoRotate: AppOptions.get("enablePrintAutoRotate"),
-      useOnlyCssZoom: AppOptions.get("useOnlyCssZoom"),
       isOffscreenCanvasSupported,
       maxCanvasPixels: AppOptions.get("maxCanvasPixels"),
       enablePermissions: AppOptions.get("enablePermissions"),
@@ -694,7 +693,7 @@ const PDFViewerApplication = {
   async run(config) {
     await this.initialize(config);
 
-    const { appConfig, eventBus, l10n } = this;
+    const { appConfig, eventBus } = this;
     let file;
     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
       const queryString = document.location.search.substring(1);
@@ -745,7 +744,7 @@ const PDFViewerApplication = {
 
     if (!this.supportsDocumentFonts) {
       AppOptions.set("disableFontFace", true);
-      l10n.get("web_fonts_disabled").then(msg => {
+      this.l10n.get("web_fonts_disabled").then(msg => {
         console.warn(msg);
       });
     }
@@ -775,22 +774,16 @@ const PDFViewerApplication = {
       true
     );
 
-    try {
-      if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
-        if (file) {
-          this.open({ url: file });
-        } else {
-          this._hideViewBookmark();
-        }
-      } else if (PDFJSDev.test("MOZCENTRAL || CHROME")) {
-        this.initPassiveLoading(file);
+    if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
+      if (file) {
+        this.open({ url: file });
       } else {
-        throw new Error("Not implemented: run");
+        this._hideViewBookmark();
       }
-    } catch (reason) {
-      l10n.get("loading_error").then(msg => {
-        this._documentError(msg, reason);
-      });
+    } else if (PDFJSDev.test("MOZCENTRAL || CHROME")) {
+      this.initPassiveLoading(file);
+    } else {
+      throw new Error("Not implemented: run");
     }
   },
 
@@ -1012,7 +1005,10 @@ const PDFViewerApplication = {
     this._saveInProgress = false;
     this._hasAnnotationEditors = false;
 
-    promises.push(this.pdfScriptingManager.destroyPromise);
+    promises.push(
+      this.pdfScriptingManager.destroyPromise,
+      this.passwordPrompt.close()
+    );
 
     this.setTitle();
     this.pdfSidebar?.reset();
@@ -1289,13 +1285,13 @@ const PDFViewerApplication = {
 
     // Since the `setInitialView` call below depends on this being resolved,
     // fetch it early to avoid delaying initial rendering of the PDF document.
-    const pageLayoutPromise = pdfDocument.getPageLayout().catch(function () {
+    const pageLayoutPromise = pdfDocument.getPageLayout().catch(() => {
       /* Avoid breaking initial rendering; ignoring errors. */
     });
-    const pageModePromise = pdfDocument.getPageMode().catch(function () {
+    const pageModePromise = pdfDocument.getPageMode().catch(() => {
       /* Avoid breaking initial rendering; ignoring errors. */
     });
-    const openActionPromise = pdfDocument.getOpenAction().catch(function () {
+    const openActionPromise = pdfDocument.getOpenAction().catch(() => {
       /* Avoid breaking initial rendering; ignoring errors. */
     });
 
@@ -1336,7 +1332,6 @@ const PDFViewerApplication = {
       })
       .catch(() => {
         /* Unable to read from storage; ignoring errors. */
-        return Object.create(null);
       });
 
     firstPagePromise.then(pdfPage => {
@@ -1369,7 +1364,7 @@ const PDFViewerApplication = {
           let scrollMode = AppOptions.get("scrollModeOnLoad");
           let spreadMode = AppOptions.get("spreadModeOnLoad");
 
-          if (stored.page && viewOnLoad !== ViewOnLoad.INITIAL) {
+          if (stored?.page && viewOnLoad !== ViewOnLoad.INITIAL) {
             hash =
               `page=${stored.page}&zoom=${zoom || stored.zoom},` +
               `${stored.scrollLeft},${stored.scrollTop}`;
@@ -1548,37 +1543,33 @@ const PDFViewerApplication = {
    * @private
    */
   async _initializeAutoPrint(pdfDocument, openActionPromise) {
-    const [openAction, javaScript] = await Promise.all([
+    const [openAction, jsActions] = await Promise.all([
       openActionPromise,
-      !this.pdfViewer.enableScripting ? pdfDocument.getJavaScript() : null,
+      this.pdfViewer.enableScripting ? null : pdfDocument.getJSActions(),
     ]);
 
     if (pdfDocument !== this.pdfDocument) {
       return; // The document was closed while the auto print data resolved.
     }
-    let triggerAutoPrint = false;
+    let triggerAutoPrint = openAction?.action === "Print";
 
-    if (openAction?.action === "Print") {
-      triggerAutoPrint = true;
-    }
-    if (javaScript) {
-      javaScript.some(js => {
-        if (!js) {
-          // Don't warn/fallback for empty JavaScript actions.
-          return false;
-        }
-        console.warn("Warning: JavaScript support is not enabled");
-        return true;
-      });
+    if (jsActions) {
+      console.warn("Warning: JavaScript support is not enabled");
 
-      if (!triggerAutoPrint) {
-        // Hack to support auto printing.
-        for (const js of javaScript) {
-          if (js && AutoPrintRegExp.test(js)) {
-            triggerAutoPrint = true;
-            break;
-          }
+      // Hack to support auto printing.
+      for (const name in jsActions) {
+        if (triggerAutoPrint) {
+          break;
         }
+        switch (name) {
+          case "WillClose":
+          case "WillSave":
+          case "DidSave":
+          case "WillPrint":
+          case "DidPrint":
+            continue;
+        }
+        triggerAutoPrint = jsActions[name].some(js => AutoPrintRegExp.test(js));
       }
     }
 

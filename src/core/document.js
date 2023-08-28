@@ -556,7 +556,8 @@ class Page {
       for (const annotation of annotations) {
         if (
           intentAny ||
-          (intentDisplay && annotation.mustBeViewed(annotationStorage)) ||
+          (intentDisplay &&
+            annotation.mustBeViewed(annotationStorage, renderForms)) ||
           (intentPrint && annotation.mustBePrinted(annotationStorage))
         ) {
           opListPromises.push(
@@ -645,9 +646,8 @@ class Page {
   }
 
   async getStructTree() {
-    const structTreeRoot = await this.pdfManager.ensureCatalog(
-      "structTreeRoot"
-    );
+    const structTreeRoot =
+      await this.pdfManager.ensureCatalog("structTreeRoot");
     if (!structTreeRoot) {
       return null;
     }
@@ -1708,11 +1708,6 @@ class PDFDocument {
     if (field.has("T")) {
       const partName = stringToPDFString(field.get("T"));
       name = name === "" ? partName : `${name}.${partName}`;
-    }
-
-    if (!field.has("Kids") && /\[\d+\]$/.test(name)) {
-      // We've a terminal node: strip the index.
-      name = name.substring(0, name.lastIndexOf("["));
     }
 
     if (!promises.has(name)) {

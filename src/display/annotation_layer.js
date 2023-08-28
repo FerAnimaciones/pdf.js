@@ -331,31 +331,38 @@ class AnnotationElement {
   get _commonActions() {
     const setColor = (jsName, styleName, event) => {
       const color = event.detail[jsName];
-      event.target.style[styleName] = ColorConverters[`${color[0]}_HTML`](
-        color.slice(1)
-      );
+      const colorType = color[0];
+      const colorArray = color.slice(1);
+      event.target.style[styleName] =
+        ColorConverters[`${colorType}_HTML`](colorArray);
+      this.annotationStorage.setValue(this.data.id, {
+        [styleName]: ColorConverters[`${colorType}_rgb`](colorArray),
+      });
     };
 
     return shadow(this, "_commonActions", {
       display: event => {
-        const hidden = event.detail.display % 2 === 1;
+        const { display } = event.detail;
+        // See scripting/constants.js for the values of `Display`.
+        // 0 = visible, 1 = hidden, 2 = noPrint and 3 = noView.
+        const hidden = display % 2 === 1;
         this.container.style.visibility = hidden ? "hidden" : "visible";
         this.annotationStorage.setValue(this.data.id, {
-          hidden,
-          print: event.detail.display === 0 || event.detail.display === 3,
+          noView: hidden,
+          noPrint: display === 1 || display === 2,
         });
       },
       print: event => {
         this.annotationStorage.setValue(this.data.id, {
-          print: event.detail.print,
+          noPrint: !event.detail.print,
         });
       },
       hidden: event => {
-        this.container.style.visibility = event.detail.hidden
-          ? "hidden"
-          : "visible";
+        const { hidden } = event.detail;
+        this.container.style.visibility = hidden ? "hidden" : "visible";
         this.annotationStorage.setValue(this.data.id, {
-          hidden: event.detail.hidden,
+          noPrint: hidden,
+          noView: hidden,
         });
       },
       focus: event => {
@@ -366,11 +373,7 @@ class AnnotationElement {
         event.target.title = event.detail.userName;
       },
       readonly: event => {
-        if (event.detail.readonly) {
-          event.target.setAttribute("readonly", "");
-        } else {
-          event.target.removeAttribute("readonly");
-        }
+        event.target.disabled = event.detail.readonly;
       },
       required: event => {
         this._setRequired(event.target, event.detail.required);
@@ -1190,7 +1193,7 @@ class TextWidgetAnnotationElement extends WidgetAnnotationElement {
       element.setAttribute("data-element-id", id);
 
       element.disabled = this.data.readOnly;
-      element.name = this.data.baseFieldName || this.data.fieldName;
+      element.name = this.data.fieldName;
       element.tabIndex = DEFAULT_TAB_INDEX;
 
       this._setRequired(element, this.data.required);
@@ -1492,7 +1495,7 @@ class CheckboxWidgetAnnotationElement extends WidgetAnnotationElement {
     element.disabled = data.readOnly;
     this._setRequired(element, this.data.required);
     element.type = "checkbox";
-    element.name = data.baseFieldName || data.fieldName;
+    element.name = data.fieldName;
     if (value) {
       element.setAttribute("checked", true);
     }
@@ -1577,7 +1580,7 @@ class RadioButtonWidgetAnnotationElement extends WidgetAnnotationElement {
     element.disabled = data.readOnly;
     this._setRequired(element, this.data.required);
     element.type = "radio";
-    element.name = data.baseFieldName || data.fieldName;
+    element.name = data.fieldName;
     if (value) {
       element.setAttribute("checked", true);
     }
@@ -1690,7 +1693,7 @@ class ChoiceWidgetAnnotationElement extends WidgetAnnotationElement {
 
     selectElement.disabled = this.data.readOnly;
     this._setRequired(selectElement, this.data.required);
-    selectElement.name = this.data.baseFieldName || this.data.fieldName;
+    selectElement.name = this.data.fieldName;
     selectElement.tabIndex = DEFAULT_TAB_INDEX;
 
     let addAnEmptyEntry = this.data.combo && this.data.options.length > 0;
@@ -2791,8 +2794,9 @@ class FileAttachmentAnnotationElement extends AnnotationElement {
   render() {
     this.container.classList.add("fileAttachmentAnnotation");
 
+    const { data } = this;
     let trigger;
-    if (this.data.hasAppearance) {
+    if (data.hasAppearance || data.fillAlpha === 0) {
       trigger = document.createElement("div");
     } else {
       // Unfortunately it seems that it's not clearly specified exactly what
@@ -2802,18 +2806,26 @@ class FileAttachmentAnnotationElement extends AnnotationElement {
       //   Additional names may be supported as well. Default value: PushPin.
       trigger = document.createElement("img");
       trigger.src = `${this.imageResourcesPath}annotation-${
-        /paperclip/i.test(this.data.name) ? "paperclip" : "pushpin"
+        /paperclip/i.test(data.name) ? "paperclip" : "pushpin"
       }.svg`;
+
+      if (data.fillAlpha && data.fillAlpha < 1) {
+        trigger.style = `filter: opacity(${Math.round(
+          data.fillAlpha * 100
+        )}%);`;
+
+        if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("TESTING")) {
+          this.container.classList.add("hasFillAlpha");
+        }
+      }
     }
     trigger.classList.add("popupTriggerArea");
     trigger.addEventListener("dblclick", this._download.bind(this));
     this.#trigger = trigger;
 
     if (
-      !this.data.popupRef &&
-      (this.data.titleObj?.str ||
-        this.data.contentsObj?.str ||
-        this.data.richText)
+      !data.popupRef &&
+      (data.titleObj?.str || data.contentsObj?.str || data.richText)
     ) {
       this._createPopup();
     }

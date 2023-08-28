@@ -26,6 +26,7 @@ import {
   FeatureTest,
   getModificationDate,
   IDENTITY_MATRIX,
+  info,
   LINE_DESCENT_FACTOR,
   LINE_FACTOR,
   OPS,
@@ -52,7 +53,7 @@ import {
   parseAppearanceStream,
   parseDefaultAppearance,
 } from "./default_appearance.js";
-import { Dict, isName, Name, Ref, RefSet } from "./primitives.js";
+import { Dict, isName, isRefsEqual, Name, Ref, RefSet } from "./primitives.js";
 import { Stream, StringStream } from "./stream.js";
 import { writeDict, writeObject } from "./writer.js";
 import { BaseStream } from "./base_stream.js";
@@ -245,17 +246,38 @@ class AnnotationFactory {
         return -1;
       }
       const pageRef = annotDict.getRaw("P");
-      if (!(pageRef instanceof Ref)) {
-        return -1;
+      if (pageRef instanceof Ref) {
+        try {
+          const pageIndex = await pdfManager.ensureCatalog("getPageIndex", [
+            pageRef,
+          ]);
+          return pageIndex;
+        } catch (ex) {
+          info(`_getPageIndex -- not a valid page reference: "${ex}".`);
+        }
       }
-      const pageIndex = await pdfManager.ensureCatalog("getPageIndex", [
-        pageRef,
-      ]);
-      return pageIndex;
+      if (annotDict.has("Kids")) {
+        return -1; // Not an annotation reference.
+      }
+      // Fallback to, potentially, checking the annotations of all pages.
+      // PLEASE NOTE: This could force the *entire* PDF document to load,
+      //              hence it absolutely cannot be done unconditionally.
+      const numPages = await pdfManager.ensureDoc("numPages");
+
+      for (let pageIndex = 0; pageIndex < numPages; pageIndex++) {
+        const page = await pdfManager.getPage(pageIndex);
+        const annotations = await pdfManager.ensure(page, "annotations");
+
+        for (const annotRef of annotations) {
+          if (annotRef instanceof Ref && isRefsEqual(annotRef, ref)) {
+            return pageIndex;
+          }
+        }
+      }
     } catch (ex) {
       warn(`_getPageIndex: "${ex}".`);
-      return -1;
     }
+    return -1;
   }
 
   static generateImages(annotations, xref, isOffscreenCanvasSupported) {
@@ -298,7 +320,13 @@ class AnnotationFactory {
             baseFont.set("Encoding", Name.get("WinAnsiEncoding"));
             const buffer = [];
             baseFontRef = xref.getNewTemporaryRef();
-            await writeObject(baseFontRef, baseFont, buffer, null);
+            const transform = xref.encrypt
+              ? xref.encrypt.createCipherTransform(
+                  baseFontRef.num,
+                  baseFontRef.gen
+                )
+              : null;
+            await writeObject(baseFontRef, baseFont, buffer, transform);
             dependencies.push({ ref: baseFontRef, data: buffer.join("") });
           }
           promises.push(
@@ -325,13 +353,19 @@ class AnnotationFactory {
             const buffer = [];
             if (smaskStream) {
               const smaskRef = xref.getNewTemporaryRef();
-              await writeObject(smaskRef, smaskStream, buffer, null);
+              const transform = xref.encrypt
+                ? xref.encrypt.createCipherTransform(smaskRef.num, smaskRef.gen)
+                : null;
+              await writeObject(smaskRef, smaskStream, buffer, transform);
               dependencies.push({ ref: smaskRef, data: buffer.join("") });
               imageStream.dict.set("SMask", smaskRef);
               buffer.length = 0;
             }
             const imageRef = (image.imageRef = xref.getNewTemporaryRef());
-            await writeObject(imageRef, imageStream, buffer, null);
+            const transform = xref.encrypt
+              ? xref.encrypt.createCipherTransform(imageRef.num, imageRef.gen)
+              : null;
+            await writeObject(imageRef, imageStream, buffer, transform);
             dependencies.push({ ref: imageRef, data: buffer.join("") });
             image.imageStream = image.smaskStream = null;
           }
@@ -628,8 +662,11 @@ class Annotation {
    * @private
    */
   _isPrintable(flags) {
+    // In Acrobat, hidden flag cancels the print one
+    // (see annotation_hidden_print.pdf).
     return (
       this._hasFlag(flags, AnnotationFlag.PRINT) &&
+      !this._hasFlag(flags, AnnotationFlag.HIDDEN) &&
       !this._hasFlag(flags, AnnotationFlag.INVISIBLE)
     );
   }
@@ -642,11 +679,13 @@ class Annotation {
    * @public
    * @memberof Annotation
    * @param {AnnotationStorage} [annotationStorage] - Storage for annotation
+   * @param {boolean} [_renderForms] - if true widgets are rendered thanks to
+   *                                   the annotation layer.
    */
-  mustBeViewed(annotationStorage) {
-    const hidden = annotationStorage?.get(this.data.id)?.hidden;
-    if (hidden !== undefined) {
-      return !hidden;
+  mustBeViewed(annotationStorage, _renderForms) {
+    const noView = annotationStorage?.get(this.data.id)?.noView;
+    if (noView !== undefined) {
+      return !noView;
     }
     return this.viewable && !this._hasFlag(this.flags, AnnotationFlag.HIDDEN);
   }
@@ -661,9 +700,9 @@ class Annotation {
    * @param {AnnotationStorage} [annotationStorage] - Storage for annotation
    */
   mustBePrinted(annotationStorage) {
-    const print = annotationStorage?.get(this.data.id)?.print;
-    if (print !== undefined) {
-      return print;
+    const noPrint = annotationStorage?.get(this.data.id)?.noPrint;
+    if (noPrint !== undefined) {
+      return !noPrint;
     }
     return this.printable;
   }
@@ -809,6 +848,9 @@ class Annotation {
    * @param {Array} lineEndings - The line endings array.
    */
   setLineEndings(lineEndings) {
+    if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) {
+      throw new Error("Not implemented: setLineEndings");
+    }
     this.lineEndings = ["None", "None"]; // The default values.
 
     if (Array.isArray(lineEndings) && lineEndings.length === 2) {
@@ -1622,16 +1664,6 @@ class WidgetAnnotation extends Annotation {
     if (data.fieldName === undefined) {
       data.fieldName = this._constructFieldName(dict);
     }
-    if (
-      data.fieldName &&
-      /\[\d+\]$/.test(data.fieldName) &&
-      !dict.has("Kids")
-    ) {
-      data.baseFieldName = data.fieldName.substring(
-        0,
-        data.fieldName.lastIndexOf("[")
-      );
-    }
 
     if (data.actions === undefined) {
       data.actions = collectActions(xref, dict, AnnotationActionEventType);
@@ -1700,7 +1732,9 @@ class WidgetAnnotation extends Annotation {
 
     data.readOnly = this.hasFieldFlag(AnnotationFieldFlag.READONLY);
     data.required = this.hasFieldFlag(AnnotationFieldFlag.REQUIRED);
-    data.hidden = this._hasFlag(data.annotationFlags, AnnotationFlag.HIDDEN);
+    data.hidden =
+      this._hasFlag(data.annotationFlags, AnnotationFlag.HIDDEN) ||
+      this._hasFlag(data.annotationFlags, AnnotationFlag.NOVIEW);
   }
 
   /**
@@ -1737,6 +1771,26 @@ class WidgetAnnotation extends Annotation {
    */
   hasFieldFlag(flag) {
     return !!(this.data.fieldFlags & flag);
+  }
+
+  /** @inheritdoc */
+  _isViewable(flags) {
+    // We don't take into account the `NOVIEW` or `HIDDEN` flags here,
+    // since the visibility can be changed by js code, hence in case
+    // it's made viewable, we should render it (with visibility set to
+    // hidden).
+    return !this._hasFlag(flags, AnnotationFlag.INVISIBLE);
+  }
+
+  /** @inheritdoc */
+  mustBeViewed(annotationStorage, renderForms) {
+    if (renderForms) {
+      return this.viewable;
+    }
+    return (
+      super.mustBeViewed(annotationStorage, renderForms) &&
+      !this._hasFlag(this.flags, AnnotationFlag.NOVIEW)
+    );
   }
 
   getRotationMatrix(annotationStorage) {
@@ -3139,6 +3193,9 @@ class ButtonWidgetAnnotation extends WidgetAnnotation {
       this._streams.push(this.uncheckedAppearance);
     }
     this._fallbackFontDict = this.fallbackFontDict;
+    if (this.data.defaultFieldValue === null) {
+      this.data.defaultFieldValue = "Off";
+    }
   }
 
   _processRadioButton(params) {
@@ -3187,6 +3244,9 @@ class ButtonWidgetAnnotation extends WidgetAnnotation {
       this._streams.push(this.uncheckedAppearance);
     }
     this._fallbackFontDict = this.fallbackFontDict;
+    if (this.data.defaultFieldValue === null) {
+      this.data.defaultFieldValue = "Off";
+    }
   }
 
   _processPushButton(params) {
@@ -3875,8 +3935,10 @@ class LineAnnotation extends MarkupAnnotation {
     const lineCoordinates = dict.getArray("L");
     this.data.lineCoordinates = Util.normalizeRect(lineCoordinates);
 
-    this.setLineEndings(dict.getArray("LE"));
-    this.data.lineEndings = this.lineEndings;
+    if (typeof PDFJSDev === "undefined" || !PDFJSDev.test("MOZCENTRAL")) {
+      this.setLineEndings(dict.getArray("LE"));
+      this.data.lineEndings = this.lineEndings;
+    }
 
     if (!this.appearance) {
       // The default stroke color is black.
@@ -4050,7 +4112,10 @@ class PolylineAnnotation extends MarkupAnnotation {
     this.data.hasOwnCanvas = this.data.noRotate;
     this.data.vertices = [];
 
-    if (!(this instanceof PolygonAnnotation)) {
+    if (
+      (typeof PDFJSDev === "undefined" || !PDFJSDev.test("MOZCENTRAL")) &&
+      !(this instanceof PolygonAnnotation)
+    ) {
       // Only meaningful for polyline annotations.
       this.setLineEndings(dict.getArray("LE"));
       this.data.lineEndings = this.lineEndings;
@@ -4625,6 +4690,12 @@ class FileAttachmentAnnotation extends MarkupAnnotation {
     const name = dict.get("Name");
     this.data.name =
       name instanceof Name ? stringToPDFString(name.name) : "PushPin";
+
+    const fillAlpha = dict.get("ca");
+    this.data.fillAlpha =
+      typeof fillAlpha === "number" && fillAlpha >= 0 && fillAlpha <= 1
+        ? fillAlpha
+        : null;
   }
 }
 
