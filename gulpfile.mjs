@@ -27,6 +27,7 @@ import { mkdirp } from "mkdirp";
 import path from "path";
 import postcss from "gulp-postcss";
 import postcssDirPseudoClass from "postcss-dir-pseudo-class";
+import postcssNesting from "postcss-nesting";
 import { preprocessPDFJSCode } from "./external/builder/preprocessor2.mjs";
 import rename from "gulp-rename";
 import replace from "gulp-replace";
@@ -201,13 +202,9 @@ function createWebpackConfig(
     !disableSourceMaps;
   const skipBabel = bundleDefines.SKIP_BABEL;
 
-  // `core-js` (see https://github.com/zloirock/core-js/issues/514), and
-  // `src/core/{glyphlist,unicode}.js` (Babel is too slow for those when
-  // source-maps are enabled) should be excluded from processing.
+  // `core-js`, see https://github.com/zloirock/core-js/issues/514,
+  // should be excluded from processing.
   const babelExcludes = ["node_modules[\\\\\\/]core-js"];
-  if (enableSourceMaps) {
-    babelExcludes.push("src[\\\\\\/]core[\\\\\\/](glyphlist|unicode)");
-  }
   const babelExcludeRegExp = new RegExp(`(${babelExcludes.join("|")})`);
 
   const babelPresets = skipBabel
@@ -215,7 +212,7 @@ function createWebpackConfig(
     : [
         [
           "@babel/preset-env",
-          { corejs: "3.31.1", shippedProposals: true, useBuiltIns: "usage" },
+          { corejs: "3.32.1", shippedProposals: true, useBuiltIns: "usage" },
         ],
       ];
   const babelPlugins = ["@babel/plugin-transform-modules-commonjs"];
@@ -398,12 +395,28 @@ function replaceNonWebpackImport() {
   return replace("__non_webpack_import__", "import");
 }
 
-function replaceJSRootName(amdName, jsName) {
-  // Saving old-style JS module name.
-  return replace(
-    'root["' + amdName + '"] = factory()',
-    'root["' + amdName + '"] = root.' + jsName + " = factory()"
-  );
+function addGlobalExports(amdName, jsName) {
+  const replacer = [
+    `module\\.exports = factory\\(\\);`,
+    `define\\("${amdName}", \\[\\], factory\\);`,
+    `exports\\["${amdName}"\\] = factory\\(\\);`,
+    `root\\["${amdName}"\\] = factory\\(\\);`,
+  ];
+  const regex = new RegExp(`(${replacer.join("|")})`, "gm");
+
+  return replace(regex, match => {
+    switch (match) {
+      case `module.exports = factory();`:
+        return `module.exports = root.${jsName} = factory();`;
+      case `define("${amdName}", [], factory);`:
+        return `define("${amdName}", [], () => { return (root.${jsName} = factory()); });`;
+      case `exports["${amdName}"] = factory();`:
+        return `exports["${amdName}"] = root.${jsName} = factory();`;
+      case `root["${amdName}"] = factory();`:
+        return `root["${amdName}"] = root.${jsName} = factory();`;
+    }
+    return match;
+  });
 }
 
 function createMainBundle(defines) {
@@ -421,7 +434,7 @@ function createMainBundle(defines) {
     .pipe(webpack2Stream(mainFileConfig))
     .pipe(replaceWebpackRequire())
     .pipe(replaceNonWebpackImport())
-    .pipe(replaceJSRootName(mainAMDName, "pdfjsLib"));
+    .pipe(addGlobalExports(mainAMDName, "pdfjsLib"));
 }
 
 function createScriptingBundle(defines, extraOptions = undefined) {
@@ -443,12 +456,7 @@ function createScriptingBundle(defines, extraOptions = undefined) {
     .pipe(webpack2Stream(scriptingFileConfig))
     .pipe(replaceWebpackRequire())
     .pipe(replaceNonWebpackImport())
-    .pipe(
-      replace(
-        'root["' + scriptingAMDName + '"] = factory()',
-        "root.pdfjsScripting = factory()"
-      )
-    );
+    .pipe(addGlobalExports(scriptingAMDName, "pdfjsScripting"));
 }
 
 function createSandboxExternal(defines) {
@@ -504,7 +512,7 @@ function createSandboxBundle(defines, extraOptions = undefined) {
     .pipe(webpack2Stream(sandboxFileConfig))
     .pipe(replaceWebpackRequire())
     .pipe(replaceNonWebpackImport())
-    .pipe(replaceJSRootName(sandboxAMDName, "pdfjsSandbox"));
+    .pipe(addGlobalExports(sandboxAMDName, "pdfjsSandbox"));
 }
 
 function createWorkerBundle(defines) {
@@ -522,7 +530,7 @@ function createWorkerBundle(defines) {
     .pipe(webpack2Stream(workerFileConfig))
     .pipe(replaceWebpackRequire())
     .pipe(replaceNonWebpackImport())
-    .pipe(replaceJSRootName(workerAMDName, "pdfjsWorker"));
+    .pipe(addGlobalExports(workerAMDName, "pdfjsWorker"));
 }
 
 function createWebBundle(defines, options) {
@@ -577,7 +585,7 @@ function createComponentsBundle(defines) {
     .pipe(webpack2Stream(componentsFileConfig))
     .pipe(replaceWebpackRequire())
     .pipe(replaceNonWebpackImport())
-    .pipe(replaceJSRootName(componentsAMDName, "pdfjsViewer"));
+    .pipe(addGlobalExports(componentsAMDName, "pdfjsViewer"));
 }
 
 function createImageDecodersBundle(defines) {
@@ -595,7 +603,7 @@ function createImageDecodersBundle(defines) {
     .pipe(webpack2Stream(componentsFileConfig))
     .pipe(replaceWebpackRequire())
     .pipe(replaceNonWebpackImport())
-    .pipe(replaceJSRootName(imageDecodersAMDName, "pdfjsImageDecoders"));
+    .pipe(addGlobalExports(imageDecodersAMDName, "pdfjsImageDecoders"));
 }
 
 function createCMapBundle() {
@@ -968,7 +976,11 @@ function buildGeneric(defines, dir) {
     preprocessHTML("web/viewer.html", defines).pipe(gulp.dest(dir + "web")),
     preprocessCSS("web/viewer.css", defines)
       .pipe(
-        postcss([postcssDirPseudoClass(), autoprefixer(AUTOPREFIXER_CONFIG)])
+        postcss([
+          postcssDirPseudoClass(),
+          postcssNesting(),
+          autoprefixer(AUTOPREFIXER_CONFIG),
+        ])
       )
       .pipe(gulp.dest(dir + "web")),
 
@@ -1051,7 +1063,11 @@ function buildComponents(defines, dir) {
     gulp.src(COMPONENTS_IMAGES).pipe(gulp.dest(dir + "images")),
     preprocessCSS("web/pdf_viewer.css", defines)
       .pipe(
-        postcss([postcssDirPseudoClass(), autoprefixer(AUTOPREFIXER_CONFIG)])
+        postcss([
+          postcssDirPseudoClass(),
+          postcssNesting(),
+          autoprefixer(AUTOPREFIXER_CONFIG),
+        ])
       )
       .pipe(gulp.dest(dir)),
   ]);
@@ -1143,7 +1159,11 @@ function buildMinified(defines, dir) {
     preprocessHTML("web/viewer.html", defines).pipe(gulp.dest(dir + "web")),
     preprocessCSS("web/viewer.css", defines)
       .pipe(
-        postcss([postcssDirPseudoClass(), autoprefixer(AUTOPREFIXER_CONFIG)])
+        postcss([
+          postcssDirPseudoClass(),
+          postcssNesting(),
+          autoprefixer(AUTOPREFIXER_CONFIG),
+        ])
       )
       .pipe(gulp.dest(dir + "web")),
 
@@ -1484,6 +1504,7 @@ gulp.task(
           .pipe(
             postcss([
               postcssDirPseudoClass(),
+              postcssNesting(),
               autoprefixer(AUTOPREFIXER_CONFIG),
             ])
           )
@@ -1565,8 +1586,7 @@ function buildLibHelper(bundleDefines, inputStream, outputDir) {
     };
   }
   function preprocess(content) {
-    const skipBabel =
-      bundleDefines.SKIP_BABEL || /\/\*\s*no-babel-preset\s*\*\//.test(content);
+    const skipBabel = bundleDefines.SKIP_BABEL;
     content = preprocessPDFJSCode(ctx, content);
     content = babel.transform(content, {
       sourceType: "module",

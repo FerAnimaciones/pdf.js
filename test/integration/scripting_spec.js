@@ -20,6 +20,7 @@ const {
   getQuerySelector,
   getComputedStyleSelector,
   loadAndWait,
+  getFirstSerialized,
 } = require("./test_utils.js");
 
 describe("Interaction", () => {
@@ -751,10 +752,22 @@ describe("Interaction", () => {
               delay: 10,
             });
 
-            for (const [id, propName, expected] of [
-              [41, "backgroundColor", "rgb(255, 0, 0)"],
-              [43, "color", "rgb(0, 255, 0)"],
-              [44, "border-top-color", "rgb(0, 0, 255)"],
+            for (const [id, propName, storedName, expected, storedExpected] of [
+              [
+                41,
+                "backgroundColor",
+                "backgroundColor",
+                "rgb(255, 0, 0)",
+                [255, 0, 0],
+              ],
+              [43, "color", "color", "rgb(0, 255, 0)", [0, 255, 0]],
+              [
+                44,
+                "border-top-color",
+                "borderColor",
+                "rgb(0, 0, 255)",
+                [0, 0, 255],
+              ],
             ]) {
               const current = await page.$eval(
                 getSelector(ref),
@@ -775,6 +788,11 @@ describe("Interaction", () => {
                 propName
               );
               expect(color).withContext(`In ${browserName}`).toEqual(expected);
+
+              const storedValue = (await getFirstSerialized(page))[storedName];
+              expect(storedValue)
+                .withContext(`In ${browserName}`)
+                .toEqual(storedExpected);
             }
           }
         })
@@ -2020,6 +2038,118 @@ describe("Interaction", () => {
           expect(hasVisibleInput)
             .withContext(`In ${browserName}`)
             .toEqual(true);
+        })
+      );
+    });
+  });
+
+  describe("in annotation_hidden_noview.pdf", () => {
+    let pages;
+
+    beforeAll(async () => {
+      pages = await loadAndWait(
+        "annotation_hidden_noview.pdf",
+        getSelector("11R")
+      );
+    });
+
+    afterAll(async () => {
+      await closePages(pages);
+    });
+
+    it("must check that invisible fields are made visible", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          await page.waitForFunction(
+            "window.PDFViewerApplication.scriptingReady === true"
+          );
+
+          let visibility = await page.$eval(
+            getSelector("7R"),
+            el => getComputedStyle(el).visibility
+          );
+          expect(visibility).withContext(`In ${browserName}`).toEqual("hidden");
+
+          visibility = await page.$eval(
+            getSelector("8R"),
+            el => getComputedStyle(el).visibility
+          );
+          expect(visibility).withContext(`In ${browserName}`).toEqual("hidden");
+
+          await page.click(getSelector("11R"));
+          await page.waitForTimeout(10);
+
+          visibility = await page.$eval(
+            getSelector("7R"),
+            el => getComputedStyle(el).visibility
+          );
+          expect(visibility)
+            .withContext(`In ${browserName}`)
+            .toEqual("visible");
+
+          visibility = await page.$eval(
+            getSelector("8R"),
+            el => getComputedStyle(el).visibility
+          );
+          expect(visibility)
+            .withContext(`In ${browserName}`)
+            .toEqual("visible");
+        })
+      );
+    });
+  });
+
+  describe("in issue16863.pdf", () => {
+    let pages;
+
+    beforeAll(async () => {
+      pages = await loadAndWait("issue16863.pdf", getSelector("334R"));
+    });
+
+    afterAll(async () => {
+      await closePages(pages);
+    });
+
+    it("must check that checkboxes are correctly resetted", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          await page.waitForFunction(
+            "window.PDFViewerApplication.scriptingReady === true"
+          );
+
+          let readonly = await page.$eval(
+            getSelector("353R"),
+            el => el.disabled
+          );
+          expect(readonly).withContext(`In ${browserName}`).toEqual(true);
+          await page.click(getSelector("334R"));
+          await page.waitForTimeout(10);
+
+          readonly = await page.$eval(getSelector("353R"), el => el.disabled);
+          expect(readonly).withContext(`In ${browserName}`).toEqual(true);
+          await page.click(getSelector("351R"));
+          await page.waitForTimeout(10);
+
+          readonly = await page.$eval(getSelector("353R"), el => el.disabled);
+          expect(readonly).withContext(`In ${browserName}`).toEqual(true);
+          await page.click(getSelector("352R"));
+          await page.waitForTimeout(10);
+
+          readonly = await page.$eval(getSelector("353R"), el => el.disabled);
+          expect(readonly).withContext(`In ${browserName}`).toEqual(false);
+
+          await page.click(getSelector("353R"));
+          await page.waitForTimeout(10);
+
+          let checked = await page.$eval(getSelector("353R"), el => el.checked);
+          expect(checked).withContext(`In ${browserName}`).toEqual(true);
+          await page.click(getSelector("334R"));
+          await page.waitForTimeout(10);
+
+          readonly = await page.$eval(getSelector("353R"), el => el.disabled);
+          expect(readonly).withContext(`In ${browserName}`).toEqual(true);
+          checked = await page.$eval(getSelector("353R"), el => el.checked);
+          expect(checked).withContext(`In ${browserName}`).toEqual(false);
         })
       );
     });

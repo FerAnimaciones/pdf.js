@@ -60,6 +60,9 @@ describe("api", function () {
   const basicApiFileName = "basicapi.pdf";
   const basicApiFileLength = 105779; // bytes
   const basicApiGetDocumentParams = buildGetDocumentParams(basicApiFileName);
+  const tracemonkeyFileName = "tracemonkey.pdf";
+  const tracemonkeyGetDocumentParams =
+    buildGetDocumentParams(tracemonkeyFileName);
 
   let CanvasFactory;
 
@@ -898,6 +901,94 @@ describe("api", function () {
     });
   });
 
+  describe("GlobalWorkerOptions", function () {
+    let savedGlobalWorkerPort;
+
+    beforeAll(function () {
+      savedGlobalWorkerPort = GlobalWorkerOptions.workerPort;
+    });
+
+    afterAll(function () {
+      GlobalWorkerOptions.workerPort = savedGlobalWorkerPort;
+    });
+
+    it("use global `workerPort` with multiple, sequential, documents", async function () {
+      if (isNodeJS) {
+        pending("Worker is not supported in Node.js.");
+      }
+
+      GlobalWorkerOptions.workerPort = new Worker(
+        new URL("../../build/generic/build/pdf.worker.js", window.location)
+      );
+
+      const loadingTask1 = getDocument(basicApiGetDocumentParams);
+      const pdfDoc1 = await loadingTask1.promise;
+      expect(pdfDoc1.numPages).toEqual(3);
+      await loadingTask1.destroy();
+
+      const loadingTask2 = getDocument(tracemonkeyGetDocumentParams);
+      const pdfDoc2 = await loadingTask2.promise;
+      expect(pdfDoc2.numPages).toEqual(14);
+      await loadingTask2.destroy();
+    });
+
+    it("use global `workerPort` with multiple, parallel, documents", async function () {
+      if (isNodeJS) {
+        pending("Worker is not supported in Node.js.");
+      }
+
+      GlobalWorkerOptions.workerPort = new Worker(
+        new URL("../../build/generic/build/pdf.worker.js", window.location)
+      );
+
+      const loadingTask1 = getDocument(basicApiGetDocumentParams);
+      const promise1 = loadingTask1.promise.then(pdfDoc => {
+        return pdfDoc.numPages;
+      });
+
+      const loadingTask2 = getDocument(tracemonkeyGetDocumentParams);
+      const promise2 = loadingTask2.promise.then(pdfDoc => {
+        return pdfDoc.numPages;
+      });
+
+      const [numPages1, numPages2] = await Promise.all([promise1, promise2]);
+      expect(numPages1).toEqual(3);
+      expect(numPages2).toEqual(14);
+
+      await Promise.all([loadingTask1.destroy(), loadingTask2.destroy()]);
+    });
+
+    it(
+      "avoid using the global `workerPort` when destruction has started, " +
+        "but not yet finished (issue 16777)",
+      async function () {
+        if (isNodeJS) {
+          pending("Worker is not supported in Node.js.");
+        }
+
+        GlobalWorkerOptions.workerPort = new Worker(
+          new URL("../../build/generic/build/pdf.worker.js", window.location)
+        );
+
+        const loadingTask = getDocument(basicApiGetDocumentParams);
+        const pdfDoc = await loadingTask.promise;
+        expect(pdfDoc.numPages).toEqual(3);
+        const destroyPromise = loadingTask.destroy();
+
+        expect(function () {
+          getDocument(tracemonkeyGetDocumentParams);
+        }).toThrow(
+          new Error(
+            "PDFWorker.fromPort - the worker is being destroyed.\n" +
+              "Please remember to await `PDFDocumentLoadingTask.destroy()`-calls."
+          )
+        );
+
+        await destroyPromise;
+      }
+    );
+  });
+
   describe("PDFDocument", function () {
     let pdfLoadingTask, pdfDocument;
 
@@ -1236,9 +1327,7 @@ describe("api", function () {
     });
 
     it("gets default page layout", async function () {
-      const loadingTask = getDocument(
-        buildGetDocumentParams("tracemonkey.pdf")
-      );
+      const loadingTask = getDocument(tracemonkeyGetDocumentParams);
       const pdfDoc = await loadingTask.promise;
       const pageLayout = await pdfDoc.getPageLayout();
       expect(pageLayout).toEqual("");
@@ -1252,9 +1341,7 @@ describe("api", function () {
     });
 
     it("gets default page mode", async function () {
-      const loadingTask = getDocument(
-        buildGetDocumentParams("tracemonkey.pdf")
-      );
+      const loadingTask = getDocument(tracemonkeyGetDocumentParams);
       const pdfDoc = await loadingTask.promise;
       const pageMode = await pdfDoc.getPageMode();
       expect(pageMode).toEqual("UseNone");
@@ -1268,9 +1355,7 @@ describe("api", function () {
     });
 
     it("gets default viewer preferences", async function () {
-      const loadingTask = getDocument(
-        buildGetDocumentParams("tracemonkey.pdf")
-      );
+      const loadingTask = getDocument(tracemonkeyGetDocumentParams);
       const pdfDoc = await loadingTask.promise;
       const prefs = await pdfDoc.getViewerPreferences();
       expect(prefs).toEqual(null);
@@ -1284,9 +1369,7 @@ describe("api", function () {
     });
 
     it("gets default open action", async function () {
-      const loadingTask = getDocument(
-        buildGetDocumentParams("tracemonkey.pdf")
-      );
+      const loadingTask = getDocument(tracemonkeyGetDocumentParams);
       const pdfDoc = await loadingTask.promise;
       const openAction = await pdfDoc.getOpenAction();
       expect(openAction).toEqual(null);
@@ -1358,21 +1441,16 @@ describe("api", function () {
       await loadingTask.destroy();
     });
 
-    it("gets javascript", async function () {
-      const javascript = await pdfDocument.getJavaScript();
-      expect(javascript).toEqual(null);
-    });
-
     it("gets javascript with printing instructions (JS action)", async function () {
       // PDF document with "JavaScript" action in the OpenAction dictionary.
       const loadingTask = getDocument(buildGetDocumentParams("issue6106.pdf"));
       const pdfDoc = await loadingTask.promise;
-      const javascript = await pdfDoc.getJavaScript();
+      const { OpenAction } = await pdfDoc.getJSActions();
 
-      expect(javascript).toEqual([
+      expect(OpenAction).toEqual([
         "this.print({bUI:true,bSilent:false,bShrinkToFit:true});",
       ]);
-      expect(javascript[0]).toMatch(AutoPrintRegExp);
+      expect(OpenAction[0]).toMatch(AutoPrintRegExp);
 
       await loadingTask.destroy();
     });
@@ -1490,18 +1568,39 @@ describe("api", function () {
       await loadingTask.destroy();
     });
 
-    it("check field object for group of buttons", async function () {
+    it("gets fieldObjects with missing /P-entries", async function () {
       if (isNodeJS) {
         pending("Linked test-cases are not supported in Node.js.");
       }
 
-      const loadingTask = getDocument(buildGetDocumentParams("f1040_2022.pdf"));
+      const loadingTask = getDocument(buildGetDocumentParams("bug1847733.pdf"));
       const pdfDoc = await loadingTask.promise;
       const fieldObjects = await pdfDoc.getFieldObjects();
 
-      expect(
-        fieldObjects["topmostSubform[0].Page1[0].c1_01"].map(o => o.id)
-      ).toEqual(["1566R", "1568R", "1569R", "1570R", "1571R"]);
+      for (const name in fieldObjects) {
+        const pageIndexes = fieldObjects[name].map(o => o.page);
+        let expected;
+
+        switch (name) {
+          case "formID":
+          case "pdf_submission_new":
+          case "simple_spc":
+          case "adobeWarning":
+          case "typeA13[0]":
+          case "typeA13[1]":
+          case "typeA13[2]":
+          case "typeA13[3]":
+            expected = [0];
+            break;
+          case "typeA15[0]":
+          case "typeA15[1]":
+          case "typeA15[2]":
+          case "typeA15[3]":
+            expected = [-1, 0, 0, 0, 0];
+            break;
+        }
+        expect(pageIndexes).toEqual(expected);
+      }
 
       await loadingTask.destroy();
     });
@@ -1543,9 +1642,7 @@ describe("api", function () {
     });
 
     it("gets non-existent outline", async function () {
-      const loadingTask = getDocument(
-        buildGetDocumentParams("tracemonkey.pdf")
-      );
+      const loadingTask = getDocument(tracemonkeyGetDocumentParams);
       const pdfDoc = await loadingTask.promise;
       const outline = await pdfDoc.getOutline();
       expect(outline).toEqual(null);
@@ -1774,9 +1871,7 @@ describe("api", function () {
     });
 
     it("gets metadata, with custom info dict entries", async function () {
-      const loadingTask = getDocument(
-        buildGetDocumentParams("tracemonkey.pdf")
-      );
+      const loadingTask = getDocument(tracemonkeyGetDocumentParams);
       const pdfDoc = await loadingTask.promise;
       const { info, metadata, contentDispositionFilename, contentLength } =
         await pdfDoc.getMetadata();
@@ -2108,8 +2203,14 @@ describe("api", function () {
       We have learned that we should more explicitly set out our aspirations for the human experience of the internet.
       We do so now.
       `.repeat(100);
+      expect(manifesto.length).toEqual(80500);
+
       let loadingTask = getDocument(buildGetDocumentParams("empty.pdf"));
       let pdfDoc = await loadingTask.promise;
+      // The initial document size (indirectly) affects the length check below.
+      let typedArray = await pdfDoc.getData();
+      expect(typedArray.length).toBeLessThan(5000);
+
       pdfDoc.annotationStorage.setValue("pdfjs_internal_editor_0", {
         annotationType: AnnotationEditorType.FREETEXT,
         rect: [10, 10, 500, 500],
@@ -2119,12 +2220,15 @@ describe("api", function () {
         value: manifesto,
         pageIndex: 0,
       });
-
       const data = await pdfDoc.saveDocument();
       await loadingTask.destroy();
 
       loadingTask = getDocument(data);
       pdfDoc = await loadingTask.promise;
+      // Ensure that the Annotation text-content was actually compressed.
+      typedArray = await pdfDoc.getData();
+      expect(typedArray.length).toBeLessThan(90000);
+
       const page = await pdfDoc.getPage(1);
       const annotations = await page.getAnnotations();
 
@@ -3364,9 +3468,7 @@ Caron Broadcasting, Inc., an Ohio corporation (“Lessee”).`)
     });
 
     it("cleans up document resources during rendering of page", async function () {
-      const loadingTask = getDocument(
-        buildGetDocumentParams("tracemonkey.pdf")
-      );
+      const loadingTask = getDocument(tracemonkeyGetDocumentParams);
       const pdfDoc = await loadingTask.promise;
       const pdfPage = await pdfDoc.getPage(1);
 
@@ -3552,7 +3654,7 @@ Caron Broadcasting, Inc., an Ohio corporation (“Lessee”).`)
   describe("Multiple `getDocument` instances", function () {
     // Regression test for https://github.com/mozilla/pdf.js/issues/6205
     // A PDF using the Helvetica font.
-    const pdf1 = buildGetDocumentParams("tracemonkey.pdf");
+    const pdf1 = tracemonkeyGetDocumentParams;
     // A PDF using the Times font.
     const pdf2 = buildGetDocumentParams("TAMReview.pdf");
     // A PDF using the Arial font.
@@ -3629,9 +3731,8 @@ Caron Broadcasting, Inc., an Ohio corporation (“Lessee”).`)
     let dataPromise;
 
     beforeAll(function () {
-      const fileName = "tracemonkey.pdf";
       dataPromise = DefaultFileReaderFactory.fetch({
-        path: TEST_PDFS_PATH + fileName,
+        path: TEST_PDFS_PATH + tracemonkeyFileName,
       });
     });
 
