@@ -17,10 +17,10 @@
 /** @typedef {import("./tools.js").AnnotationEditorUIManager} AnnotationEditorUIManager */
 /** @typedef {import("../display_utils.js").PageViewport} PageViewport */
 // eslint-disable-next-line max-len
-/** @typedef {import("../../web/text_accessibility.js").TextAccessibilityManager} TextAccessibilityManager */
-/** @typedef {import("../../web/interfaces").IL10n} IL10n */
+/** @typedef {import("../../../web/text_accessibility.js").TextAccessibilityManager} TextAccessibilityManager */
+/** @typedef {import("../../../web/interfaces").IL10n} IL10n */
 // eslint-disable-next-line max-len
-/** @typedef {import("../src/display/annotation_layer.js").AnnotationLayer} AnnotationLayer */
+/** @typedef {import("../annotation_layer.js").AnnotationLayer} AnnotationLayer */
 
 import { AnnotationEditorType, FeatureTest } from "../../shared/util.js";
 import { AnnotationEditor } from "./editor.js";
@@ -377,7 +377,10 @@ class AnnotationEditorLayer {
       editor.isAttachedToDOM = true;
     }
 
+    // The editor must have the right position before being moved in the DOM.
+    editor.fixAndSetPosition();
     this.moveEditorInDOM(editor);
+
     editor.onceAdded();
     this.#uiManager.addToAnnotationStorage(editor);
   }
@@ -406,7 +409,7 @@ class AnnotationEditorLayer {
       }, 0);
     }
 
-    this.#accessibilityManager?.moveElementInDOM(
+    editor._structTreeParentId = this.#accessibilityManager?.moveElementInDOM(
       this.div,
       editor.div,
       editor.contentDiv,
@@ -675,6 +678,8 @@ class AnnotationEditorLayer {
    */
   destroy() {
     if (this.#uiManager.getActive()?.parent === this) {
+      // We need to commit the current editor before destroying the layer.
+      this.#uiManager.commitOrRemove();
       this.#uiManager.setActiveEditor(null);
     }
 
