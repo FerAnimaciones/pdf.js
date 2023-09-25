@@ -20,6 +20,7 @@
 
 import { bindEvents, ColorManager } from "./tools.js";
 import { FeatureTest, shadow, unreachable } from "../../shared/util.js";
+import { noContextMenu } from "../display_utils.js";
 
 /**
  * @typedef {Object} AnnotationEditorParameters
@@ -34,7 +35,15 @@ import { FeatureTest, shadow, unreachable } from "../../shared/util.js";
  * Base class for editors.
  */
 class AnnotationEditor {
+  #altText = "";
+
+  #altTextDecorative = false;
+
   #altTextButton = null;
+
+  #altTextTooltip = null;
+
+  #altTextTooltipTimeout = null;
 
   #keepAspectRatio = false;
 
@@ -111,6 +120,10 @@ class AnnotationEditor {
     this.deleted = false;
   }
 
+  get editorType() {
+    return Object.getPrototypeOf(this).constructor._type;
+  }
+
   static get _defaultLineColor() {
     return shadow(
       this,
@@ -136,7 +149,11 @@ class AnnotationEditor {
    */
   static initialize(l10n, options = null) {
     AnnotationEditor._l10nPromise ||= new Map(
-      ["alt_text_button_label"].map(str => [str, l10n.get(str)])
+      [
+        "editor_alt_text_button_label",
+        "editor_alt_text_edit_button_label",
+        "editor_alt_text_decorative_tooltip",
+      ].map(str => [str, l10n.get(str)])
     );
     if (options?.strings) {
       for (const str of options.strings) {
@@ -573,10 +590,6 @@ class AnnotationEditor {
     return [0, 0];
   }
 
-  static #noContextMenu(e) {
-    e.preventDefault();
-  }
-
   #createResizers() {
     if (this.#resizersDiv) {
       return;
@@ -595,7 +608,7 @@ class AnnotationEditor {
         "pointerdown",
         this.#resizerPointerdown.bind(this, name)
       );
-      div.addEventListener("contextmenu", AnnotationEditor.#noContextMenu);
+      div.addEventListener("contextmenu", noContextMenu);
     }
     this.div.prepend(this.#resizersDiv);
   }
@@ -806,28 +819,35 @@ class AnnotationEditor {
     this.fixAndSetPosition();
   }
 
-  addAltTextButton() {
+  async addAltTextButton() {
     if (this.#altTextButton) {
       return;
     }
-    const altText = (this.#altTextButton = document.createElement("span"));
+    const altText = (this.#altTextButton = document.createElement("button"));
     altText.className = "altText";
-    AnnotationEditor._l10nPromise.get("alt_text_button_label").then(msg => {
-      altText.textContent = msg;
-    });
+    const msg = await AnnotationEditor._l10nPromise.get(
+      "editor_alt_text_button_label"
+    );
+    altText.textContent = msg;
+    altText.setAttribute("aria-label", msg);
     altText.tabIndex = "0";
+    altText.addEventListener("contextmenu", noContextMenu);
+    altText.addEventListener("pointerdown", event => event.stopPropagation());
     altText.addEventListener(
       "click",
       event => {
         event.preventDefault();
+        this._uiManager.editAltText(this);
       },
       { capture: true }
     );
     altText.addEventListener("keydown", event => {
       if (event.target === altText && event.key === "Enter") {
         event.preventDefault();
+        this._uiManager.editAltText(this);
       }
     });
+    this.#setAltTextButtonState();
     this.div.append(altText);
     if (!AnnotationEditor.SMALL_EDITOR_SIZE) {
       // We take the width of the alt text button and we add 40% to it to be
@@ -838,6 +858,85 @@ class AnnotationEditor {
         Math.round(altText.getBoundingClientRect().width * (1 + PERCENT / 100))
       );
     }
+  }
+
+  async #setAltTextButtonState() {
+    const button = this.#altTextButton;
+    if (!button) {
+      return;
+    }
+    if (!this.#altText && !this.#altTextDecorative) {
+      button.classList.remove("done");
+      this.#altTextTooltip?.remove();
+      return;
+    }
+    AnnotationEditor._l10nPromise
+      .get("editor_alt_text_edit_button_label")
+      .then(msg => {
+        button.setAttribute("aria-label", msg);
+      });
+
+    let tooltip = this.#altTextTooltip;
+    if (!tooltip) {
+      this.#altTextTooltip = tooltip = document.createElement("span");
+      tooltip.className = "tooltip";
+      tooltip.setAttribute("role", "tooltip");
+      const id = (tooltip.id = `alt-text-tooltip-${this.id}`);
+      button.setAttribute("aria-describedby", id);
+
+      const DELAY_TO_SHOW_TOOLTIP = 100;
+      button.addEventListener("mouseenter", () => {
+        this.#altTextTooltipTimeout = setTimeout(() => {
+          this.#altTextTooltipTimeout = null;
+          this.#altTextTooltip.classList.add("show");
+          this._uiManager._eventBus.dispatch("reporttelemetry", {
+            source: this,
+            details: {
+              type: "editing",
+              subtype: this.editorType,
+              data: {
+                action: "alt_text_tooltip",
+              },
+            },
+          });
+        }, DELAY_TO_SHOW_TOOLTIP);
+      });
+      button.addEventListener("mouseleave", () => {
+        clearTimeout(this.#altTextTooltipTimeout);
+        this.#altTextTooltipTimeout = null;
+        this.#altTextTooltip?.classList.remove("show");
+      });
+    }
+    button.classList.add("done");
+    tooltip.innerText = this.#altTextDecorative
+      ? await AnnotationEditor._l10nPromise.get(
+          "editor_alt_text_decorative_tooltip"
+        )
+      : this.#altText;
+
+    if (!tooltip.parentNode) {
+      button.append(tooltip);
+    }
+  }
+
+  getClientDimensions() {
+    return this.div.getBoundingClientRect();
+  }
+
+  get altTextData() {
+    return {
+      altText: this.#altText,
+      decorative: this.#altTextDecorative,
+    };
+  }
+
+  set altTextData({ altText, decorative }) {
+    if (this.#altText === altText && this.#altTextDecorative === decorative) {
+      return;
+    }
+    this.#altText = altText;
+    this.#altTextDecorative = decorative;
+    this.#setAltTextButtonState();
   }
 
   /**
@@ -1148,6 +1247,12 @@ class AnnotationEditor {
     } else {
       this._uiManager.removeEditor(this);
     }
+
+    // The editor is removed so we can remove the alt text button and if it's
+    // restored then it's up to the subclass to add it back.
+    this.#altTextButton?.remove();
+    this.#altTextButton = null;
+    this.#altTextTooltip = null;
   }
 
   /**

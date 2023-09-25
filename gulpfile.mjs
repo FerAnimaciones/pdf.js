@@ -244,6 +244,7 @@ function createWebpackConfig(
     "display-svg": "src/display/stubs.js",
   };
   const viewerAlias = {
+    "web-alt_text_manager": "web/alt_text_manager.js",
     "web-annotation_editor_params": "web/annotation_editor_params.js",
     "web-com": "",
     "web-pdf_attachment_viewer": "web/pdf_attachment_viewer.js",
@@ -1353,6 +1354,7 @@ gulp.task(
       console.log();
       console.log("### Building mozilla-central extension");
       const defines = builder.merge(DEFINES, { MOZCENTRAL: true });
+      const gvDefines = builder.merge(defines, { GECKOVIEW: true });
 
       const MOZCENTRAL_DIR = BUILD_DIR + "mozcentral/",
         MOZCENTRAL_EXTENSION_DIR = MOZCENTRAL_DIR + "browser/extensions/pdfjs/",
@@ -1404,7 +1406,7 @@ gulp.task(
         preprocessHTML("web/viewer.html", defines).pipe(
           gulp.dest(MOZCENTRAL_CONTENT_DIR + "web")
         ),
-        preprocessHTML("web/viewer-geckoview.html", defines).pipe(
+        preprocessHTML("web/viewer-geckoview.html", gvDefines).pipe(
           gulp.dest(MOZCENTRAL_CONTENT_DIR + "web")
         ),
 
@@ -1413,7 +1415,7 @@ gulp.task(
           .pipe(replaceMozcentralCSS())
           .pipe(gulp.dest(MOZCENTRAL_CONTENT_DIR + "web")),
 
-        preprocessCSS("web/viewer-geckoview.css", defines)
+        preprocessCSS("web/viewer-geckoview.css", gvDefines)
           .pipe(postcss([autoprefixer(MOZCENTRAL_AUTOPREFIXER_CONFIG)]))
           .pipe(replaceMozcentralCSS())
           .pipe(gulp.dest(MOZCENTRAL_CONTENT_DIR + "web")),
