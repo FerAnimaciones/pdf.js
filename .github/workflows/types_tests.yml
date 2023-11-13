@@ -1,4 +1,4 @@
-name: CI
+name: Types tests
 on: [push, pull_request]
 permissions:
   contents: read
@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: [18, lts/*, latest]
+        node-version: [lts/*]
 
     steps:
       - name: Checkout repository
@@ -30,8 +30,5 @@ jobs:
       - name: Install other dependencies
         run: npm install
 
-      - name: Run external tests
-        run: gulp externaltest
-
-      - name: Run CLI unit tests
-        run: gulp unittestcli
+      - name: Run types tests
+        run: gulp typestest

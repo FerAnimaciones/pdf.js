@@ -188,6 +188,9 @@ function createWebpackConfig(
     BUNDLE_VERSION: versionInfo.version,
     BUNDLE_BUILD: versionInfo.commit,
     TESTING: defines.TESTING ?? process.env.TESTING === "true",
+    BROWSER_PREFERENCES: defaultPreferencesDir
+      ? getBrowserPreferences(defaultPreferencesDir)
+      : {},
     DEFAULT_PREFERENCES: defaultPreferencesDir
       ? getDefaultPreferences(defaultPreferencesDir)
       : {},
@@ -216,7 +219,7 @@ function createWebpackConfig(
         [
           "@babel/preset-env",
           {
-            corejs: "3.33.1",
+            corejs: "3.33.2",
             exclude: ["web.structured-clone"],
             shippedProposals: true,
             useBuiltIns: "usage",
@@ -419,7 +422,7 @@ function tweakWebpackOutput(jsName) {
       case " __webpack_exports__ = {};":
         return ` __webpack_exports__ = globalThis.${jsName} = {};`;
       case " __webpack_exports__ = await __webpack_exports__;":
-        return ` __webpack_exports__ = globalThis.${jsName} = await __webpack_exports__;`;
+        return ` __webpack_exports__ = globalThis.${jsName} = await (globalThis.${jsName}Promise = __webpack_exports__);`;
     }
     return match;
   });
@@ -681,6 +684,9 @@ function createTestSource(testsName, { bot = false, xfaOnly = false } = {}) {
     if (process.argv.includes("--noChrome") || forceNoChrome) {
       args.push("--noChrome");
     }
+    if (process.argv.includes("--headless")) {
+      args.push("--headless");
+    }
 
     const testProcess = startNode(args, { cwd: TEST_DIR, stdio: "inherit" });
     testProcess.on("close", function (code) {
@@ -708,6 +714,9 @@ function makeRef(done, bot) {
   }
   if (process.argv.includes("--noChrome") || forceNoChrome) {
     args.push("--noChrome");
+  }
+  if (process.argv.includes("--headless")) {
+    args.push("--headless");
   }
 
   const testProcess = startNode(args, { cwd: TEST_DIR, stdio: "inherit" });
@@ -811,15 +820,30 @@ async function parseDefaultPreferences(dir) {
     "./" + DEFAULT_PREFERENCES_DIR + dir + "app_options.mjs"
   );
 
+  const browserPrefs = AppOptions.getAll(OptionKind.BROWSER);
+  if (Object.keys(browserPrefs).length === 0) {
+    throw new Error("No browser preferences found.");
+  }
   const prefs = AppOptions.getAll(OptionKind.PREFERENCE);
   if (Object.keys(prefs).length === 0) {
     throw new Error("No default preferences found.");
   }
 
   fs.writeFileSync(
+    DEFAULT_PREFERENCES_DIR + dir + "browser_preferences.json",
+    JSON.stringify(browserPrefs)
+  );
+  fs.writeFileSync(
     DEFAULT_PREFERENCES_DIR + dir + "default_preferences.json",
     JSON.stringify(prefs)
   );
+}
+
+function getBrowserPreferences(dir) {
+  const str = fs
+    .readFileSync(DEFAULT_PREFERENCES_DIR + dir + "browser_preferences.json")
+    .toString();
+  return JSON.parse(str);
 }
 
 function getDefaultPreferences(dir) {
@@ -1051,6 +1075,7 @@ function buildComponents(defines, dir) {
     "web/images/annotation-*.svg",
     "web/images/loading-icon.gif",
     "web/images/altText_*.svg",
+    "web/images/editor-toolbar-*.svg",
   ];
 
   return merge([
@@ -1581,6 +1606,9 @@ function buildLib(defines, dir) {
     BUNDLE_VERSION: versionInfo.version,
     BUNDLE_BUILD: versionInfo.commit,
     TESTING: defines.TESTING ?? process.env.TESTING === "true",
+    BROWSER_PREFERENCES: getBrowserPreferences(
+      defines.SKIP_BABEL ? "lib/" : "lib-legacy/"
+    ),
     DEFAULT_PREFERENCES: getDefaultPreferences(
       defines.SKIP_BABEL ? "lib/" : "lib-legacy/"
     ),
@@ -1721,7 +1749,6 @@ gulp.task(
     return streamqueue(
       { objectMode: true },
       createTestSource("unit", { bot: true }),
-      createTestSource("font", { bot: true }),
       createTestSource("browser", { bot: true }),
       createTestSource("integration")
     );
@@ -1746,7 +1773,6 @@ gulp.task(
     return streamqueue(
       { objectMode: true },
       createTestSource("unit", { bot: true }),
-      createTestSource("font", { bot: true }),
       createTestSource("browser", { bot: true, xfaOnly: true }),
       createTestSource("integration")
     );
@@ -1825,11 +1851,11 @@ gulp.task(
       return merge([
         packageJson().pipe(gulp.dest(TYPESTEST_DIR)),
         gulp
-          .src([
-            GENERIC_DIR + "build/pdf.mjs",
-            GENERIC_DIR + "build/pdf.worker.mjs",
-          ])
-          .pipe(gulp.dest(TYPESTEST_DIR + "build/")),
+          .src("external/dist/**/*", {
+            base: "external/dist",
+            removeBOM: false,
+          })
+          .pipe(gulp.dest(TYPESTEST_DIR)),
         gulp
           .src(TYPES_DIR + "**/*", { base: TYPES_DIR })
           .pipe(gulp.dest(TYPESTEST_DIR + "types/")),
@@ -2414,12 +2440,3 @@ gulp.task("externaltest", function (done) {
   });
   done();
 });
-
-gulp.task(
-  "ci-test",
-  gulp.series(
-    gulp.parallel("lint", "externaltest", "unittestcli"),
-    "lint-chromium",
-    "typestest"
-  )
-);

@@ -8189,5 +8189,30 @@
       "link": true,
       "rounds": 1,
       "type": "eq"
+   },
+   { 
+      "id": "issue17215-annotations",
+      "file": "pdfs/issue17215.pdf",
+      "md5": "968848af6ef593a3d1d6aba030ef47cb",
+      "rounds": 1,
+      "type": "eq",
+      "annotations": true
+   },
+   {
+      "id": "issue17232-annotations",
+      "file": "pdfs/issue17232.pdf",
+      "md5": "90ade9fc5721ddf8d17e8cfc43e186a4",
+      "rounds": 1,
+      "link": true,
+      "type": "eq",
+      "annotations": true
+   },
+   {
+      "id": "issue16839",
+      "file": "pdfs/issue16839.pdf",
+      "md5": "413fceec0ac31e079dc487bf4c5e44d8",
+      "rounds": 1,
+      "link": true,
+      "type": "eq"
    }
 ]

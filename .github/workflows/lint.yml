@@ -1,17 +1,17 @@
-name: CI
+name: Lint
 on: [push, pull_request]
 permissions:
   contents: read
 
 jobs:
-  test:
-    name: Test
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
       matrix:
-        node-version: [18, lts/*, latest]
+        node-version: [lts/*]
 
     steps:
       - name: Checkout repository
@@ -30,8 +30,8 @@ jobs:
       - name: Install other dependencies
         run: npm install
 
-      - name: Run external tests
-        run: gulp externaltest
+      - name: Run lint
+        run: gulp lint
 
-      - name: Run CLI unit tests
-        run: gulp unittestcli
+      - name: Run lint-chromium
+        run: gulp lint-chromium
