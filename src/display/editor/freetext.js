@@ -132,6 +132,8 @@ class FreeTextEditor extends AnnotationEditor {
 
   static _type = "freetext";
 
+  static _editorType = AnnotationEditorType.FREETEXT;
+
   constructor(params) {
     super({ ...params, name: "freeTextEditor" });
     this.#color =
@@ -144,7 +146,7 @@ class FreeTextEditor extends AnnotationEditor {
   /** @inheritdoc */
   static initialize(l10n) {
     AnnotationEditor.initialize(l10n, {
-      strings: ["free_text2_default_content", "editor_free_text2_aria_label"],
+      strings: ["pdfjs-free-text-default-content"],
     });
     const style = getComputedStyle(document.documentElement);
 
@@ -335,7 +337,7 @@ class FreeTextEditor extends AnnotationEditor {
 
     // In case the blur callback hasn't been called.
     this.isEditing = false;
-    this.parent.div.classList.add("freeTextEditing");
+    this.parent.div.classList.add("freetextEditing");
   }
 
   /** @inheritdoc */
@@ -374,7 +376,7 @@ class FreeTextEditor extends AnnotationEditor {
     this.isEditing = false;
     if (this.parent) {
       this.parent.setEditingState(true);
-      this.parent.div.classList.add("freeTextEditing");
+      this.parent.div.classList.add("freetextEditing");
     }
     super.remove();
   }
@@ -508,7 +510,7 @@ class FreeTextEditor extends AnnotationEditor {
   }
 
   editorDivInput(event) {
-    this.parent.div.classList.toggle("freeTextEditing", this.isEmpty());
+    this.parent.div.classList.toggle("freetextEditing", this.isEmpty());
   }
 
   /** @inheritdoc */
@@ -540,14 +542,11 @@ class FreeTextEditor extends AnnotationEditor {
     this.editorDiv.className = "internal";
 
     this.editorDiv.setAttribute("id", this.#editorDivId);
+    this.editorDiv.setAttribute("data-l10n-id", "pdfjs-free-text");
     this.enableEditing();
 
     AnnotationEditor._l10nPromise
-      .get("editor_free_text2_aria_label")
-      .then(msg => this.editorDiv?.setAttribute("aria-label", msg));
-
-    AnnotationEditor._l10nPromise
-      .get("free_text2_default_content")
+      .get("pdfjs-free-text-default-content")
       .then(msg => this.editorDiv?.setAttribute("default-content", msg));
     this.editorDiv.contentEditable = true;
 
@@ -649,6 +648,7 @@ class FreeTextEditor extends AnnotationEditor {
     }
   }
 
+  /** @inheritdoc */
   get contentDiv() {
     return this.editorDiv;
   }

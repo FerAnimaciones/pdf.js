@@ -26,6 +26,7 @@ import {
   AnnotationFieldFlag,
   AnnotationFlag,
   AnnotationType,
+  isNodeJS,
   OPS,
   RenderingIntentFlag,
   stringToBytes,
@@ -34,6 +35,7 @@ import {
 import {
   CMAP_URL,
   createIdFactory,
+  getNodeVersion,
   STANDARD_FONT_DATA_URL,
   XRefMock,
 } from "./test_utils.js";
@@ -2207,6 +2209,12 @@ describe("annotation", function () {
     });
 
     it("should compress and save text", async function () {
+      if (isNodeJS && getNodeVersion().major === 21) {
+        pending(
+          "CompressionStream behaves differently in Node.js 21, " +
+            "compared to Firefox, Chrome, and Node.js 18/20."
+        );
+      }
       const textWidgetRef = Ref.get(123, 0);
       const xref = new XRefMock([
         { ref: textWidgetRef, data: textWidgetDict },
@@ -4082,7 +4090,7 @@ describe("annotation", function () {
         const popupDict = new Dict();
         popupDict.set("Type", Name.get("Annot"));
         popupDict.set("Subtype", Name.get("Popup"));
-        popupDict.set("F", 25); // not viewable
+        popupDict.set("F", 56); // not viewable
         popupDict.set("Parent", parentDict);
 
         const popupRef = Ref.get(13, 0);
@@ -4097,7 +4105,7 @@ describe("annotation", function () {
         expect(data.annotationType).toEqual(AnnotationType.POPUP);
         // We should not modify the `annotationFlags` returned through
         // e.g., the API.
-        expect(data.annotationFlags).toEqual(25);
+        expect(data.annotationFlags).toEqual(56);
         // The popup should inherit the `viewable` property of the parent.
         expect(viewable).toEqual(true);
       }
