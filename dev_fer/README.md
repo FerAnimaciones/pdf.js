@@ -9,8 +9,16 @@ Eliminar el archivo "package-lock.json" si continua sin poder instalar.
 
 # Compilation
 
+## Minified
+
 ```
 $ gulp minified
+```
+
+## Generic
+
+```
+$ gulp generic
 ```
 
 
