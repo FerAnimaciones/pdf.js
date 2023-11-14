@@ -552,7 +552,9 @@ See https://github.com/adobe-type-tools/cmap-resources
     if(urlParams.get("editor")=="false"){
       document.getElementById("editorModeButtons").hidden = true;
     }
-    document.getElementById("openFile").hidden = true;
+    if(urlParams.get("open")=="false"){
+      document.getElementById("secondaryOpenFile").hidden = true;
+    }
     window.addEventListener('load', function () {
       PDFViewerApplication.preferences.set('pdfBugEnabled', true);
     })
