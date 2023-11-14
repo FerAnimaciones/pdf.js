@@ -224,7 +224,7 @@ See https://github.com/adobe-type-tools/cmap-resources
             </button>
 
 <!--#if GENERIC-->
-            <div class="horizontalToolbarSeparator"></div>
+            <div id="horizontalToolbarSeparatorFiles" class="horizontalToolbarSeparator"></div>
 <!--#else-->
 <!--        <div class="horizontalToolbarSeparator visibleMediumView"></div>-->
 <!--#endif-->
@@ -543,6 +543,7 @@ See https://github.com/adobe-type-tools/cmap-resources
     <div id="printContainer"></div>
     <script type="text/javascript">
     const urlParams = new URLSearchParams(window.location.search);
+
     if(urlParams.get("print")=="false"){
       document.getElementById("print").hidden = true;
     }
@@ -552,9 +553,8 @@ See https://github.com/adobe-type-tools/cmap-resources
     if(urlParams.get("editor")=="false"){
       document.getElementById("editorModeButtons").hidden = true;
     }
-    if(urlParams.get("open")=="false"){
-      document.getElementById("secondaryOpenFile").hidden = true;
-    }
+    document.getElementById("secondaryOpenFile").hidden = true;
+    document.getElementById("horizontalToolbarSeparatorFiles").hidden = true;
     window.addEventListener('load', function () {
       PDFViewerApplication.preferences.set('pdfBugEnabled', true);
     })
