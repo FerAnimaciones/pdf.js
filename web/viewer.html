@@ -542,22 +542,26 @@ See https://github.com/adobe-type-tools/cmap-resources
     </div> <!-- outerContainer -->
     <div id="printContainer"></div>
     <script type="text/javascript">
-    const urlParams = new URLSearchParams(window.location.search);
+        try {
+            const urlParams = new URLSearchParams(window.location.search);
 
-    if(urlParams.get("print")=="false"){
-      document.getElementById("print").hidden = true;
-    }
-    if(urlParams.get("download")=="false"){
-      document.getElementById("download").hidden = true;
-    }
-    if(urlParams.get("editor")=="false"){
-      document.getElementById("editorModeButtons").hidden = true;
-    }
-    document.getElementById("secondaryOpenFile").hidden = true;
-    document.getElementById("horizontalToolbarSeparatorFiles").hidden = true;
-    // window.addEventListener('load', function () {
-    //   PDFViewerApplication.preferences.set('pdfBugEnabled', true);
-    // })
+            if (urlParams.get("print") == "false") {
+              document.getElementById("print").hidden = true;
+            }
+            if (urlParams.get("download") == "false") {
+              document.getElementById("download").hidden = true;
+            }
+            if (urlParams.get("editor") == "false") {
+              document.getElementById("editorModeButtons").hidden = true;
+            }
+            document.getElementById("secondaryOpenFile").hidden = true;
+            document.getElementById("horizontalToolbarSeparatorFiles").hidden = true;
+            // window.addEventListener('load', function () {
+            //   PDFViewerApplication.preferences.set('pdfBugEnabled', true);
+            // })
+          } catch (error) {
+            console.log(error);
+          }
     </script>
 <!--#if GENERIC-->
     <input type="file" id="fileInput" class="hidden">
