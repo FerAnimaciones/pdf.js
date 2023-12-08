@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-import { AnnotationEditorType, noContextMenu } from "pdfjs-lib";
+import { AnnotationEditorType, ColorPicker, noContextMenu } from "pdfjs-lib";
 import {
   DEFAULT_SCALE,
   DEFAULT_SCALE_VALUE,
@@ -21,8 +21,6 @@ import {
   MIN_SCALE,
   toggleCheckedBtn,
 } from "./ui_utils.js";
-
-const PAGE_NUMBER_LOADING_INDICATOR = "visiblePageIsLoading";
 
 /**
  * @typedef {Object} ToolbarOptions
@@ -72,6 +70,18 @@ class Toolbar {
         },
       },
       {
+        element: options.editorHighlightButton,
+        eventName: "switchannotationeditormode",
+        eventDetails: {
+          get mode() {
+            const { classList } = options.editorHighlightButton;
+            return classList.contains("toggled")
+              ? AnnotationEditorType.NONE
+              : AnnotationEditorType.HIGHLIGHT;
+          },
+        },
+      },
+      {
         element: options.editorInkButton,
         eventName: "switchannotationeditormode",
         eventDetails: {
@@ -110,7 +120,27 @@ class Toolbar {
     // Bind the event listeners for click and various other actions.
     this.#bindListeners(options);
 
+    if (options.editorHighlightColorPicker) {
+      this.eventBus._on(
+        "annotationeditoruimanager",
+        ({ uiManager }) => {
+          this.#setAnnotationEditorUIManager(
+            uiManager,
+            options.editorHighlightColorPicker
+          );
+        },
+        // Once the color picker has been added, we don't want to add it again.
+        { once: true }
+      );
+    }
+
     this.reset();
+  }
+
+  #setAnnotationEditorUIManager(uiManager, parentContainer) {
+    const colorPicker = new ColorPicker({ uiManager });
+    uiManager.setMainHighlightColorPicker(colorPicker);
+    parentContainer.append(colorPicker.renderMainDropdown());
   }
 
   setPageNumber(pageNumber, pageLabel) {
@@ -204,6 +234,8 @@ class Toolbar {
   #bindEditorToolsListener({
     editorFreeTextButton,
     editorFreeTextParamsToolbar,
+    editorHighlightButton,
+    editorHighlightParamsToolbar,
     editorInkButton,
     editorInkParamsToolbar,
     editorStampButton,
@@ -214,6 +246,11 @@ class Toolbar {
         editorFreeTextButton,
         mode === AnnotationEditorType.FREETEXT,
         editorFreeTextParamsToolbar
+      );
+      toggleCheckedBtn(
+        editorHighlightButton,
+        mode === AnnotationEditorType.HIGHLIGHT,
+        editorHighlightParamsToolbar
       );
       toggleCheckedBtn(
         editorInkButton,
@@ -228,6 +265,7 @@ class Toolbar {
 
       const isDisable = mode === AnnotationEditorType.DISABLE;
       editorFreeTextButton.disabled = isDisable;
+      editorHighlightButton.disabled = isDisable;
       editorInkButton.disabled = isDisable;
       editorStampButton.disabled = isDisable;
     };
@@ -300,7 +338,7 @@ class Toolbar {
   updateLoadingIndicatorState(loading = false) {
     const { pageNumber } = this.items;
 
-    pageNumber.classList.toggle(PAGE_NUMBER_LOADING_INDICATOR, loading);
+    pageNumber.classList.toggle("loading", loading);
   }
 }
 

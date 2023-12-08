@@ -27,7 +27,12 @@ import {
   Util,
   warn,
 } from "../../shared/util.js";
-import { getColorValues, getRGB, PixelsPerInch } from "../display_utils.js";
+import {
+  fetchData,
+  getColorValues,
+  getRGB,
+  PixelsPerInch,
+} from "../display_utils.js";
 
 function bindEvents(obj, element, names) {
   for (const name of names) {
@@ -116,12 +121,7 @@ class ImageManager {
       let image;
       if (typeof rawData === "string") {
         data.url = rawData;
-
-        const response = await fetch(rawData);
-        if (!response.ok) {
-          throw new Error(response.statusText);
-        }
-        image = await response.blob();
+        image = await fetchData(rawData, "blob");
       } else {
         image = data.file = rawData;
       }
@@ -438,7 +438,7 @@ class KeyboardManager {
     if (checker && !checker(self, event)) {
       return;
     }
-    callback.bind(self, ...args)();
+    callback.bind(self, ...args, event)();
 
     // For example, ctrl+s in a FreeText must be handled by the viewer, hence
     // the event must bubble.
@@ -545,6 +545,8 @@ class AnnotationEditorUIManager {
 
   #focusMainContainerTimeoutId = null;
 
+  #highlightColors = null;
+
   #idManager = new IdManager();
 
   #isEnabled = false;
@@ -552,6 +554,8 @@ class AnnotationEditorUIManager {
   #isWaiting = false;
 
   #lastActiveElement = null;
+
+  #mainHighlightColorPicker = null;
 
   #mode = AnnotationEditorType.NONE;
 
@@ -607,6 +611,7 @@ class AnnotationEditorUIManager {
       // For example, sliders can be controlled with the arrow keys.
       return (
         self.#container.contains(document.activeElement) &&
+        document.activeElement.tagName !== "BUTTON" &&
         self.hasSomethingToControl()
       );
     };
@@ -736,7 +741,8 @@ class AnnotationEditorUIManager {
     altTextManager,
     eventBus,
     pdfDocument,
-    pageColors
+    pageColors,
+    highlightColors
   ) {
     this.#container = container;
     this.#viewer = viewer;
@@ -749,6 +755,7 @@ class AnnotationEditorUIManager {
     this.#annotationStorage = pdfDocument.annotationStorage;
     this.#filterFactory = pdfDocument.filterFactory;
     this.#pageColors = pageColors;
+    this.#highlightColors = highlightColors || null;
     this.viewParameters = {
       realScale: PixelsPerInch.PDF_TO_CSS_UNITS,
       rotation: 0,
@@ -801,6 +808,24 @@ class AnnotationEditorUIManager {
       "direction",
       getComputedStyle(this.#container).direction
     );
+  }
+
+  get highlightColors() {
+    return shadow(
+      this,
+      "highlightColors",
+      this.#highlightColors
+        ? new Map(
+            this.#highlightColors
+              .split(",")
+              .map(pair => pair.split("=").map(x => x.trim()))
+          )
+        : null
+    );
+  }
+
+  setMainHighlightColorPicker(colorPicker) {
+    this.#mainHighlightColorPicker = colorPicker;
   }
 
   editAltText(editor) {
@@ -1217,7 +1242,9 @@ class AnnotationEditorUIManager {
   }
 
   addNewEditorFromKeyboard() {
-    this.currentLayer.addNewEditor();
+    if (this.currentLayer.canCreateNewEmptyEditor()) {
+      this.currentLayer.addNewEditor();
+    }
   }
 
   /**
@@ -1244,9 +1271,14 @@ class AnnotationEditorUIManager {
     if (!this.#editorTypes) {
       return;
     }
-    if (type === AnnotationEditorParamsType.CREATE) {
-      this.currentLayer.addNewEditor();
-      return;
+
+    switch (type) {
+      case AnnotationEditorParamsType.CREATE:
+        this.currentLayer.addNewEditor();
+        return;
+      case AnnotationEditorParamsType.HIGHLIGHT_DEFAULT_COLOR:
+        this.#mainHighlightColorPicker?.updateColor(value);
+        break;
     }
 
     for (const editor of this.#selectedEditors) {
@@ -1604,7 +1636,11 @@ class AnnotationEditorUIManager {
     if (this.#activeEditor) {
       // An editor is being edited so just commit it.
       this.#activeEditor.commitOrRemove();
-      return;
+      if (this.#mode !== AnnotationEditorType.NONE) {
+        // If the mode is NONE, we want to really unselect the editor, hence we
+        // mustn't return here.
+        return;
+      }
     }
 
     if (!this.hasSelection) {

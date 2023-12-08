@@ -228,6 +228,21 @@ const PDFViewerApplication = {
       await this._parseHashParams();
     }
 
+    if (typeof PDFJSDev === "undefined" || !PDFJSDev.test("MOZCENTRAL")) {
+      let mode;
+      switch (AppOptions.get("viewerCssTheme")) {
+        case 1:
+          mode = "is-light";
+          break;
+        case 2:
+          mode = "is-dark";
+          break;
+      }
+      if (mode) {
+        document.documentElement.classList.add(mode);
+      }
+    }
+
     // Ensure that the `L10n`-instance has been initialized before creating
     // e.g. the various viewer components.
     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
@@ -427,6 +442,7 @@ const PDFViewerApplication = {
       textLayerMode: AppOptions.get("textLayerMode"),
       annotationMode: AppOptions.get("annotationMode"),
       annotationEditorMode,
+      annotationEditorHighlightColors: AppOptions.get("highlightEditorColors"),
       imageResourcesPath: AppOptions.get("imageResourcesPath"),
       enablePrintAutoRotate: AppOptions.get("enablePrintAutoRotate"),
       isOffscreenCanvasSupported,
@@ -469,6 +485,11 @@ const PDFViewerApplication = {
       if (annotationEditorMode !== AnnotationEditorType.DISABLE) {
         if (!isOffscreenCanvasSupported) {
           appConfig.toolbar?.editorStampButton?.classList.add("hidden");
+        }
+
+        const editorHighlightButton = appConfig.toolbar?.editorHighlightButton;
+        if (editorHighlightButton && AppOptions.get("enableHighlightEditor")) {
+          editorHighlightButton.hidden = false;
         }
 
         this.annotationEditorParams = new AnnotationEditorParams(
@@ -668,16 +689,6 @@ const PDFViewerApplication = {
     if (this.supportsIntegratedFind) {
       appConfig.toolbar?.viewFind?.classList.add("hidden");
     }
-
-    appConfig.mainContainer.addEventListener(
-      "transitionend",
-      function (evt) {
-        if (evt.target === /* mainContainer */ this) {
-          eventBus.dispatch("resize", { source: this });
-        }
-      },
-      true
-    );
 
     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
       if (file) {
