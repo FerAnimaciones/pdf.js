@@ -125,6 +125,14 @@ const defaultOptions = {
     value: false,
     kind: OptionKind.VIEWER + OptionKind.PREFERENCE,
   },
+  enableHighlightEditor: {
+    // We'll probably want to make some experiments before enabling this
+    // in Firefox release, but it has to be temporary.
+    // TODO: remove it when unnecessary.
+    /** @type {boolean} */
+    value: typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING"),
+    kind: OptionKind.VIEWER + OptionKind.PREFERENCE,
+  },
   enablePermissions: {
     /** @type {boolean} */
     value: false,
@@ -148,6 +156,11 @@ const defaultOptions = {
   externalLinkTarget: {
     /** @type {number} */
     value: 0,
+    kind: OptionKind.VIEWER + OptionKind.PREFERENCE,
+  },
+  highlightEditorColors: {
+    /** @type {string} */
+    value: "yellow=#FFFF98,green=#53FFBC,blue=#80EBFF,pink=#FFCBE6,red=#FF4F5F",
     kind: OptionKind.VIEWER + OptionKind.PREFERENCE,
   },
   historyUpdateUrl: {
@@ -236,8 +249,8 @@ const defaultOptions = {
       typeof PDFJSDev === "undefined"
         ? "../external/bcmaps/"
         : PDFJSDev.test("MOZCENTRAL")
-        ? "resource://pdf.js/web/cmaps/"
-        : "../web/cmaps/",
+          ? "resource://pdf.js/web/cmaps/"
+          : "../web/cmaps/",
     kind: OptionKind.API,
   },
   disableAutoFetch: {
@@ -302,8 +315,8 @@ const defaultOptions = {
       typeof PDFJSDev === "undefined"
         ? "../external/standard_fonts/"
         : PDFJSDev.test("MOZCENTRAL")
-        ? "resource://pdf.js/web/standard_fonts/"
-        : "../web/standard_fonts/",
+          ? "resource://pdf.js/web/standard_fonts/"
+          : "../web/standard_fonts/",
     kind: OptionKind.API,
   },
   verbosity: {
@@ -324,11 +337,18 @@ const defaultOptions = {
       typeof PDFJSDev === "undefined"
         ? "../src/pdf.worker.js"
         : PDFJSDev.test("MOZCENTRAL")
-        ? "resource://pdf.js/build/pdf.worker.mjs"
-        : "../build/pdf.worker.mjs",
+          ? "resource://pdf.js/build/pdf.worker.mjs"
+          : "../build/pdf.worker.mjs",
     kind: OptionKind.WORKER,
   },
 };
+if (typeof PDFJSDev === "undefined" || !PDFJSDev.test("MOZCENTRAL")) {
+  defaultOptions.viewerCssTheme = {
+    /** @type {number} */
+    value: typeof PDFJSDev !== "undefined" && PDFJSDev.test("CHROME") ? 2 : 0,
+    kind: OptionKind.VIEWER + OptionKind.PREFERENCE,
+  };
+}
 if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
   defaultOptions.defaultUrl = {
     /** @type {string} */
