@@ -110,7 +110,7 @@ class DefaultExternalServices {
     throw new Error("Not implemented: createL10n");
   }
 
-  static createScripting(options) {
+  static createScripting() {
     throw new Error("Not implemented: createScripting");
   }
 
@@ -353,6 +353,16 @@ const PDFViewerApplication = {
     ) {
       AppOptions.set("locale", params.get("locale"));
     }
+
+    // Set some specific preferences for tests.
+    if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("TESTING")) {
+      if (params.has("highlighteditorcolors")) {
+        AppOptions.set(
+          "highlightEditorColors",
+          params.get("highlighteditorcolors")
+        );
+      }
+    }
   },
 
   /**
@@ -395,10 +405,6 @@ const PDFViewerApplication = {
 
     const pdfScriptingManager = new PDFScriptingManager({
       eventBus,
-      sandboxBundleSrc:
-        typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC || CHROME")
-          ? AppOptions.get("sandboxBundleSrc")
-          : null,
       externalServices,
       docProperties: this._scriptingDocProperties.bind(this),
     });
@@ -445,7 +451,6 @@ const PDFViewerApplication = {
       annotationEditorHighlightColors: AppOptions.get("highlightEditorColors"),
       imageResourcesPath: AppOptions.get("imageResourcesPath"),
       enablePrintAutoRotate: AppOptions.get("enablePrintAutoRotate"),
-      isOffscreenCanvasSupported,
       maxCanvasPixels: AppOptions.get("maxCanvasPixels"),
       enablePermissions: AppOptions.get("enablePermissions"),
       pageColors,

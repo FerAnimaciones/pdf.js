@@ -301,6 +301,22 @@ pdfjs-editor-ink-button-label = Tegn
 pdfjs-editor-stamp-button =
     .title = Tilføj eller rediger billeder
 pdfjs-editor-stamp-button-label = Tilføj eller rediger billeder
+pdfjs-editor-remove-button =
+    .title = Fjern
+
+## Remove button for the various kind of editor.
+
+pdfjs-editor-remove-ink-button =
+    .title = Fjern tegning
+pdfjs-editor-remove-freetext-button =
+    .title = Fjern tekst
+pdfjs-editor-remove-stamp-button =
+    .title = Fjern billede
+pdfjs-editor-remove-highlight-button =
+    .title = Fjern fremhævning
+
+##
+
 # Editor Parameters
 pdfjs-editor-free-text-color-input = Farve
 pdfjs-editor-free-text-size-input = Størrelse
@@ -347,3 +363,22 @@ pdfjs-editor-resizer-label-bottom-right = Nederste højre hjørne - tilpas stør
 pdfjs-editor-resizer-label-bottom-middle = Nederst i midten - tilpas størrelse
 pdfjs-editor-resizer-label-bottom-left = Nederste venstre hjørne - tilpas størrelse
 pdfjs-editor-resizer-label-middle-left = Midten til venstre — tilpas størrelse
+
+## Color picker
+
+# This means "Color used to highlight text"
+pdfjs-editor-highlight-colorpicker-label = Fremhævningsfarve
+pdfjs-editor-colorpicker-button =
+    .title = Skift farve
+pdfjs-editor-colorpicker-dropdown =
+    .aria-label = Farvevalg
+pdfjs-editor-colorpicker-yellow =
+    .title = Gul
+pdfjs-editor-colorpicker-green =
+    .title = Grøn
+pdfjs-editor-colorpicker-blue =
+    .title = Blå
+pdfjs-editor-colorpicker-pink =
+    .title = Lyserød
+pdfjs-editor-colorpicker-red =
+    .title = Rød

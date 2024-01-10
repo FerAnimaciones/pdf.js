@@ -268,7 +268,7 @@ function examineRefImages() {
   });
 }
 
-function startRefTest(masterMode, showRefImages) {
+async function startRefTest(masterMode, showRefImages) {
   function finalize() {
     stopServer();
     let numRuns = 0;
@@ -402,11 +402,10 @@ function startRefTest(masterMode, showRefImages) {
   if (!manifest) {
     return;
   }
-  if (options.noDownload) {
-    checkRefsTmp();
-  } else {
-    ensurePDFsDownloaded(checkRefsTmp);
+  if (!options.noDownload) {
+    await ensurePDFsDownloaded();
   }
+  checkRefsTmp();
 }
 
 function handleSessionTimeout(session) {
@@ -908,6 +907,7 @@ function unitTestPostHandler(req, res) {
 async function startBrowser({ browserName, headless, startUrl }) {
   const options = {
     product: browserName,
+    protocol: "cdp",
     // Note that using `headless: true` gives a deprecation warning; see
     // https://github.com/puppeteer/puppeteer#default-runtime-settings.
     headless: headless === true ? "new" : false,
@@ -936,6 +936,10 @@ async function startBrowser({ browserName, headless, startUrl }) {
   }
 
   if (browserName === "firefox") {
+    // Run tests with the WebDriver BiDi protocol enabled only for Firefox for
+    // now given that for Chrome further fixes are needed first.
+    options.protocol = "webDriverBiDi";
+
     options.extraPrefsFirefox = {
       // avoid to have a prompt when leaving a page with a form
       "dom.disable_beforeunload": true,
@@ -1051,9 +1055,6 @@ async function closeSession(browser) {
       continue;
     }
     if (session.browser !== undefined) {
-      for (const page of await session.browser.pages()) {
-        await page.close();
-      }
       await session.browser.close();
     }
     session.closed = true;
@@ -1069,47 +1070,43 @@ async function closeSession(browser) {
   }
 }
 
-function ensurePDFsDownloaded(callback) {
-  var manifest = getTestManifest();
-  downloadManifestFiles(manifest, async function () {
-    try {
-      await verifyManifestFiles(manifest);
-    } catch {
-      console.log(
-        "Unable to verify the checksum for the files that are " +
-          "used for testing."
-      );
-      console.log(
-        "Please re-download the files, or adjust the MD5 " +
-          "checksum in the manifest for the files listed above.\n"
-      );
-      if (options.strictVerify) {
-        process.exit(1);
-      }
+async function ensurePDFsDownloaded() {
+  const manifest = getTestManifest();
+  await downloadManifestFiles(manifest);
+  try {
+    await verifyManifestFiles(manifest);
+  } catch {
+    console.log(
+      "Unable to verify the checksum for the files that are " +
+        "used for testing."
+    );
+    console.log(
+      "Please re-download the files, or adjust the MD5 " +
+        "checksum in the manifest for the files listed above.\n"
+    );
+    if (options.strictVerify) {
+      process.exit(1);
     }
-    callback();
-  });
+  }
 }
 
-function main() {
+async function main() {
   if (options.statsFile) {
     stats = [];
   }
 
   if (options.downloadOnly) {
-    ensurePDFsDownloaded(function () {});
+    await ensurePDFsDownloaded();
   } else if (options.unitTest) {
     // Allows linked PDF files in unit-tests as well.
-    ensurePDFsDownloaded(function () {
-      startUnitTest("/test/unit/unit_test.html", "unit");
-    });
+    await ensurePDFsDownloaded();
+    startUnitTest("/test/unit/unit_test.html", "unit");
   } else if (options.fontTest) {
     startUnitTest("/test/font/font_test.html", "font");
   } else if (options.integration) {
     // Allows linked PDF files in integration-tests as well.
-    ensurePDFsDownloaded(function () {
-      startIntegrationTest();
-    });
+    await ensurePDFsDownloaded();
+    startIntegrationTest();
   } else {
     startRefTest(options.masterMode, options.reftest);
   }
