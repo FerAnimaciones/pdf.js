@@ -999,12 +999,15 @@ class Annotation {
     }
     if (borderStyle.has("BS")) {
       const dict = borderStyle.get("BS");
-      const dictType = dict.get("Type");
 
-      if (!dictType || isName(dictType, "Border")) {
-        this.borderStyle.setWidth(dict.get("W"), this.rectangle);
-        this.borderStyle.setStyle(dict.get("S"));
-        this.borderStyle.setDashArray(dict.getArray("D"));
+      if (dict instanceof Dict) {
+        const dictType = dict.get("Type");
+
+        if (!dictType || isName(dictType, "Border")) {
+          this.borderStyle.setWidth(dict.get("W"), this.rectangle);
+          this.borderStyle.setStyle(dict.get("S"));
+          this.borderStyle.setDashArray(dict.getArray("D"));
+        }
       }
     } else if (borderStyle.has("Border")) {
       const array = borderStyle.getArray("Border");
@@ -1192,7 +1195,7 @@ class Annotation {
           firstPosition ||= item.transform.slice(-2);
           buffer.push(item.str);
           if (item.hasEOL) {
-            text.push(buffer.join(""));
+            text.push(buffer.join("").trimEnd());
             buffer.length = 0;
           }
         }
@@ -1204,29 +1207,36 @@ class Annotation {
       task,
       resources,
       includeMarkedContent: true,
+      keepWhiteSpace: true,
       sink,
       viewBox,
     });
     this.reset();
 
     if (buffer.length) {
-      text.push(buffer.join(""));
+      text.push(buffer.join("").trimEnd());
     }
 
     if (text.length > 1 || text[0]) {
       const appearanceDict = this.appearance.dict;
-      const bbox = appearanceDict.getArray("BBox") || [0, 0, 1, 1];
-      const matrix = appearanceDict.getArray("Matrix") || [1, 0, 0, 1, 0, 0];
-      const rect = this.data.rect;
-      const transform = getTransformMatrix(rect, bbox, matrix);
-      transform[4] -= rect[0];
-      transform[5] -= rect[1];
-      firstPosition = Util.applyTransform(firstPosition, transform);
-      firstPosition = Util.applyTransform(firstPosition, matrix);
-
-      this.data.textPosition = firstPosition;
+      this.data.textPosition = this._transformPoint(
+        firstPosition,
+        appearanceDict.getArray("BBox"),
+        appearanceDict.getArray("Matrix")
+      );
       this.data.textContent = text;
     }
+  }
+
+  _transformPoint(coords, bbox, matrix) {
+    const { rect } = this.data;
+    bbox ||= [0, 0, 1, 1];
+    matrix ||= [1, 0, 0, 1, 0, 0];
+    const transform = getTransformMatrix(rect, bbox, matrix);
+    transform[4] -= rect[0];
+    transform[5] -= rect[1];
+    coords = Util.applyTransform(coords, transform);
+    return Util.applyTransform(coords, matrix);
   }
 
   /**
@@ -3764,7 +3774,9 @@ class FreeTextAnnotation extends MarkupAnnotation {
     const { evaluatorOptions, xref } = params;
     this.data.annotationType = AnnotationType.FREETEXT;
     this.setDefaultAppearance(params);
-    if (this.appearance) {
+    this._hasAppearance = !!this.appearance;
+
+    if (this._hasAppearance) {
       const { fontColor, fontSize } = parseAppearanceStream(
         this.appearance,
         evaluatorOptions,
@@ -3772,29 +3784,42 @@ class FreeTextAnnotation extends MarkupAnnotation {
       );
       this.data.defaultAppearanceData.fontColor = fontColor;
       this.data.defaultAppearanceData.fontSize = fontSize || 10;
-    } else if (this._isOffscreenCanvasSupported) {
-      const strokeAlpha = params.dict.get("CA");
-      const fakeUnicodeFont = new FakeUnicodeFont(xref, "sans-serif");
+    } else {
       this.data.defaultAppearanceData.fontSize ||= 10;
       const { fontColor, fontSize } = this.data.defaultAppearanceData;
-      this.appearance = fakeUnicodeFont.createAppearance(
-        this._contents.str,
-        this.rectangle,
-        this.rotation,
-        fontSize,
-        fontColor,
-        strokeAlpha
-      );
-      this._streams.push(this.appearance, FakeUnicodeFont.toUnicodeStream);
-    } else {
-      warn(
-        "FreeTextAnnotation: OffscreenCanvas is not supported, annotation may not render correctly."
-      );
+      if (this._contents.str) {
+        this.data.textContent = this._contents.str
+          .split(/\r\n?|\n/)
+          .map(line => line.trimEnd());
+        const { coords, bbox, matrix } = FakeUnicodeFont.getFirstPositionInfo(
+          this.rectangle,
+          this.rotation,
+          fontSize
+        );
+        this.data.textPosition = this._transformPoint(coords, bbox, matrix);
+      }
+      if (this._isOffscreenCanvasSupported) {
+        const strokeAlpha = params.dict.get("CA");
+        const fakeUnicodeFont = new FakeUnicodeFont(xref, "sans-serif");
+        this.appearance = fakeUnicodeFont.createAppearance(
+          this._contents.str,
+          this.rectangle,
+          this.rotation,
+          fontSize,
+          fontColor,
+          strokeAlpha
+        );
+        this._streams.push(this.appearance, FakeUnicodeFont.toUnicodeStream);
+      } else {
+        warn(
+          "FreeTextAnnotation: OffscreenCanvas is not supported, annotation may not render correctly."
+        );
+      }
     }
   }
 
   get hasTextContent() {
-    return !!this.appearance;
+    return this._hasAppearance;
   }
 
   static createNewDict(annotation, xref, { apRef, ap }) {

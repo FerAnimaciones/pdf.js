@@ -16,7 +16,7 @@
 import os from "os";
 const isMac = os.platform() === "darwin";
 
-function loadAndWait(filename, selector, zoom, pageSetup) {
+function loadAndWait(filename, selector, zoom, pageSetup, options) {
   return Promise.all(
     global.integrationSessions.map(async session => {
       const page = await session.browser.newPage();
@@ -36,9 +36,16 @@ function loadAndWait(filename, selector, zoom, pageSetup) {
         });
       });
 
+      let app_options = "";
+      if (options) {
+        // Options must be handled in app.js::_parseHashParams.
+        for (const [key, value] of Object.entries(options)) {
+          app_options += `&${key}=${encodeURIComponent(value)}`;
+        }
+      }
       const url = `${
         global.integrationBaseUrl
-      }?file=/test/pdfs/${filename}#zoom=${zoom ?? "page-fit"}`;
+      }?file=/test/pdfs/${filename}#zoom=${zoom ?? "page-fit"}${app_options}`;
 
       await page.goto(url);
       if (pageSetup) {
@@ -46,9 +53,11 @@ function loadAndWait(filename, selector, zoom, pageSetup) {
       }
 
       await page.bringToFront();
-      await page.waitForSelector(selector, {
-        timeout: 0,
-      });
+      if (selector) {
+        await page.waitForSelector(selector, {
+          timeout: 0,
+        });
+      }
       return [session.name, page];
     })
   );
@@ -71,7 +80,7 @@ function closePages(pages) {
     pages.map(async ([_, page]) => {
       // Avoid to keep something from a previous test.
       await page.evaluate(() => window.localStorage.clear());
-      await page.close();
+      await page.close({ runBeforeUnload: false });
     })
   );
 }
