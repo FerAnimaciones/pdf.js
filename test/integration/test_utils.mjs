@@ -85,11 +85,39 @@ function closePages(pages) {
   );
 }
 
+async function waitForSandboxTrip(page) {
+  const handle = await page.evaluateHandle(() => [
+    new Promise(resolve => {
+      window.addEventListener("sandboxtripend", resolve, { once: true });
+      window.PDFViewerApplication.pdfScriptingManager.sandboxTrip();
+    }),
+  ]);
+  await awaitPromise(handle);
+}
+
+function waitForTimeout(milliseconds) {
+  /**
+   * Wait for the given number of milliseconds.
+   *
+   * Note that waiting for an arbitrary time in tests is discouraged because it
+   * can easily cause intermittent failures, which is why this functionality is
+   * no longer provided by Puppeteer 22+ and we have to implement it ourselves
+   * for the remaining callers in the integration tests. We should avoid
+   * creating new usages of this function; instead please refer to the better
+   * alternatives at https://github.com/puppeteer/puppeteer/pull/11780.
+   */
+  return new Promise(resolve => {
+    setTimeout(resolve, milliseconds);
+  });
+}
+
 async function clearInput(page, selector) {
   await page.click(selector);
   await kbSelectAll(page);
   await page.keyboard.press("Backspace");
-  await page.waitForTimeout(10);
+  await page.waitForFunction(
+    `document.querySelector('${selector}').value === ""`
+  );
 }
 
 function getSelector(id) {
@@ -190,6 +218,57 @@ async function mockClipboard(pages) {
   );
 }
 
+async function pasteFromClipboard(page, data, selector, timeout = 100) {
+  await page.evaluate(async dat => {
+    const items = Object.create(null);
+    for (const [type, value] of Object.entries(dat)) {
+      if (value.startsWith("data:")) {
+        const resp = await fetch(value);
+        items[type] = await resp.blob();
+      } else {
+        items[type] = new Blob([value], { type });
+      }
+    }
+    await navigator.clipboard.write([new ClipboardItem(items)]);
+  }, data);
+
+  let hasPasteEvent = false;
+  while (!hasPasteEvent) {
+    // We retry to paste if nothing has been pasted before the timeout.
+    const handle = await page.evaluateHandle(
+      (sel, timeOut) => {
+        let callback = null;
+        return [
+          Promise.race([
+            new Promise(resolve => {
+              callback = e => resolve(e.clipboardData.items.length !== 0);
+              (sel ? document.querySelector(sel) : document).addEventListener(
+                "paste",
+                callback,
+                {
+                  once: true,
+                }
+              );
+            }),
+            new Promise(resolve => {
+              setTimeout(() => {
+                document
+                  .querySelector(sel)
+                  .removeEventListener("paste", callback);
+                resolve(false);
+              }, timeOut);
+            }),
+          ]),
+        ];
+      },
+      selector,
+      timeout
+    );
+    await kbPaste(page);
+    hasPasteEvent = await awaitPromise(handle);
+  }
+}
+
 async function getSerialized(page, filter = undefined) {
   const values = await page.evaluate(() => {
     const { map } =
@@ -265,9 +344,10 @@ async function serializeBitmapDimensions(page) {
     const { map } =
       window.PDFViewerApplication.pdfDocument.annotationStorage.serializable;
     return map
-      ? Array.from(map.values(), x => {
-          return { width: x.bitmap.width, height: x.bitmap.height };
-        })
+      ? Array.from(map.values(), x => ({
+          width: x.bitmap.width,
+          height: x.bitmap.height,
+        }))
       : [];
   });
 }
@@ -275,7 +355,6 @@ async function serializeBitmapDimensions(page) {
 async function dragAndDropAnnotation(page, startX, startY, tX, tY) {
   await page.mouse.move(startX, startY);
   await page.mouse.down();
-  await page.waitForTimeout(10);
   await page.mouse.move(startX + tX, startY + tY);
   await page.mouse.up();
   await page.waitForSelector("#viewer:not(.noUserSelect)");
@@ -290,26 +369,37 @@ function waitForAnnotationEditorLayer(page) {
   });
 }
 
-async function waitForTextLayer(page) {
-  const handle = await createPromise(page, resolve => {
-    window.PDFViewerApplication.eventBus.on("textlayerrendered", resolve);
-  });
-  return awaitPromise(handle);
-}
-
 async function scrollIntoView(page, selector) {
   const handle = await page.evaluateHandle(
     sel => [
       new Promise(resolve => {
-        document
-          .getElementById("viewerContainer")
-          .addEventListener("scrollend", resolve, { once: true });
+        const container = document.getElementById("viewerContainer");
+        if (container.scrollHeight <= container.clientHeight) {
+          resolve();
+          return;
+        }
+        container.addEventListener("scrollend", resolve, { once: true });
         const element = document.querySelector(sel);
         element.scrollIntoView({ behavior: "instant", block: "start" });
       }),
     ],
     selector
   );
+  return awaitPromise(handle);
+}
+
+async function firstPageOnTop(page) {
+  const handle = await page.evaluateHandle(() => [
+    new Promise(resolve => {
+      const container = document.getElementById("viewerContainer");
+      if (container.scrollTop === 0 && container.scrollLeft === 0) {
+        resolve();
+        return;
+      }
+      container.addEventListener("scrollend", resolve, { once: true });
+      container.scrollTo(0, 0);
+    }),
+  ]);
   return awaitPromise(handle);
 }
 
@@ -444,12 +534,31 @@ async function kbDeleteLastWord(page) {
   }
 }
 
+async function kbFocusNext(page) {
+  const handle = await createPromise(page, resolve => {
+    window.addEventListener("focusin", resolve, { once: true });
+  });
+  await page.keyboard.press("Tab");
+  await awaitPromise(handle);
+}
+
+async function kbFocusPrevious(page) {
+  const handle = await createPromise(page, resolve => {
+    window.addEventListener("focusin", resolve, { once: true });
+  });
+  await page.keyboard.down("Shift");
+  await page.keyboard.press("Tab");
+  await page.keyboard.up("Shift");
+  await awaitPromise(handle);
+}
+
 export {
   awaitPromise,
   clearInput,
   closePages,
   createPromise,
   dragAndDropAnnotation,
+  firstPageOnTop,
   getAnnotationStorage,
   getComputedStyleSelector,
   getEditorDimensions,
@@ -467,6 +576,8 @@ export {
   kbBigMoveUp,
   kbCopy,
   kbDeleteLastWord,
+  kbFocusNext,
+  kbFocusPrevious,
   kbGoToBegin,
   kbGoToEnd,
   kbModifierDown,
@@ -477,14 +588,16 @@ export {
   kbUndo,
   loadAndWait,
   mockClipboard,
+  pasteFromClipboard,
   scrollIntoView,
   serializeBitmapDimensions,
   waitForAnnotationEditorLayer,
   waitForEntryInStorage,
   waitForEvent,
+  waitForSandboxTrip,
   waitForSelectedEditor,
   waitForSerialized,
   waitForStorageEntries,
-  waitForTextLayer,
+  waitForTimeout,
   waitForUnselectedEditor,
 };

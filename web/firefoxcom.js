@@ -13,8 +13,8 @@
  * limitations under the License.
  */
 
-import { DefaultExternalServices, PDFViewerApplication } from "./app.js";
 import { isPdfFile, PDFDataRangeTransport } from "pdfjs-lib";
+import { BaseExternalServices } from "./external_services.js";
 import { BasePreferences } from "./preferences.js";
 import { DEFAULT_SCALE_VALUE } from "./ui_utils.js";
 import { L10n } from "./l10n.js";
@@ -23,6 +23,11 @@ if (typeof PDFJSDev === "undefined" || !PDFJSDev.test("MOZCENTRAL")) {
   throw new Error(
     'Module "./firefoxcom.js" shall not be used outside MOZCENTRAL builds.'
   );
+}
+
+let viewerApp = { initialized: false };
+function initCom(app) {
+  viewerApp = app;
 }
 
 class FirefoxCom {
@@ -147,7 +152,7 @@ class DownloadManager {
   }
 }
 
-class FirefoxPreferences extends BasePreferences {
+class Preferences extends BasePreferences {
   async _readFromStorage(prefObj) {
     return FirefoxCom.requestAsync("getPreferences", prefObj);
   }
@@ -166,14 +171,14 @@ class FirefoxPreferences extends BasePreferences {
   const findLen = "find".length;
 
   const handleEvent = function ({ type, detail }) {
-    if (!PDFViewerApplication.initialized) {
+    if (!viewerApp.initialized) {
       return;
     }
     if (type === "findbarclose") {
-      PDFViewerApplication.eventBus.dispatch(type, { source: window });
+      viewerApp.eventBus.dispatch(type, { source: window });
       return;
     }
-    PDFViewerApplication.eventBus.dispatch("find", {
+    viewerApp.eventBus.dispatch("find", {
       source: window,
       type: type.substring(findLen),
       query: detail.query,
@@ -193,18 +198,18 @@ class FirefoxPreferences extends BasePreferences {
 (function listenZoomEvents() {
   const events = ["zoomin", "zoomout", "zoomreset"];
   const handleEvent = function ({ type, detail }) {
-    if (!PDFViewerApplication.initialized) {
+    if (!viewerApp.initialized) {
       return;
     }
     // Avoid attempting to needlessly reset the zoom level *twice* in a row,
     // when using the `Ctrl + 0` keyboard shortcut.
     if (
       type === "zoomreset" &&
-      PDFViewerApplication.pdfViewer.currentScaleValue === DEFAULT_SCALE_VALUE
+      viewerApp.pdfViewer.currentScaleValue === DEFAULT_SCALE_VALUE
     ) {
       return;
     }
-    PDFViewerApplication.eventBus.dispatch(type, { source: window });
+    viewerApp.eventBus.dispatch(type, { source: window });
   };
 
   for (const event of events) {
@@ -214,10 +219,10 @@ class FirefoxPreferences extends BasePreferences {
 
 (function listenSaveEvent() {
   const handleEvent = function ({ type, detail }) {
-    if (!PDFViewerApplication.initialized) {
+    if (!viewerApp.initialized) {
       return;
     }
-    PDFViewerApplication.eventBus.dispatch("download", { source: window });
+    viewerApp.eventBus.dispatch("download", { source: window });
   };
 
   window.addEventListener("save", handleEvent);
@@ -225,10 +230,10 @@ class FirefoxPreferences extends BasePreferences {
 
 (function listenEditingEvent() {
   const handleEvent = function ({ detail }) {
-    if (!PDFViewerApplication.initialized) {
+    if (!viewerApp.initialized) {
       return;
     }
-    PDFViewerApplication.eventBus.dispatch("editingaction", {
+    viewerApp.eventBus.dispatch("editingaction", {
       source: window,
       name: detail.name,
     });
@@ -241,9 +246,9 @@ if (PDFJSDev.test("GECKOVIEW")) {
   (function listenQueryEvents() {
     window.addEventListener("pdf.js.query", async ({ detail: { queryId } }) => {
       let result = null;
-      if (queryId === "canDownloadInsteadOfPrint") {
+      if (viewerApp.initialized && queryId === "canDownloadInsteadOfPrint") {
         result = false;
-        const { pdfDocument, pdfViewer } = PDFViewerApplication;
+        const { pdfDocument, pdfViewer } = viewerApp;
         if (pdfDocument) {
           try {
             const hasUnchangedAnnotations =
@@ -253,14 +258,8 @@ if (PDFJSDev.test("GECKOVIEW")) {
             const hasWillPrint =
               pdfViewer.enableScripting &&
               !!(await pdfDocument.getJSActions())?.WillPrint;
-            const hasUnchangedOptionalContent = (
-              await pdfViewer.optionalContentConfigPromise
-            ).hasInitialVisibility;
 
-            result =
-              hasUnchangedAnnotations &&
-              !hasWillPrint &&
-              hasUnchangedOptionalContent;
+            result = hasUnchangedAnnotations && !hasWillPrint;
           } catch {
             console.warn("Unable to check if the document can be downloaded.");
           }
@@ -309,16 +308,22 @@ class FirefoxScripting {
   }
 }
 
-class FirefoxExternalServices extends DefaultExternalServices {
-  static updateFindControlState(data) {
+class MLManager {
+  guess(data) {
+    return FirefoxCom.requestAsync("mlGuess", data);
+  }
+}
+
+class ExternalServices extends BaseExternalServices {
+  updateFindControlState(data) {
     FirefoxCom.request("updateFindControlState", data);
   }
 
-  static updateFindMatchesCount(data) {
+  updateFindMatchesCount(data) {
     FirefoxCom.request("updateFindMatchesCount", data);
   }
 
-  static initPassiveLoading(callbacks) {
+  initPassiveLoading() {
     let pdfDataRangeTransport;
 
     window.addEventListener("message", function windowMessage(e) {
@@ -335,7 +340,7 @@ class FirefoxExternalServices extends DefaultExternalServices {
       switch (args.pdfjsLoadAction) {
         case "supportsRangedLoading":
           if (args.done && !args.data) {
-            callbacks.onError();
+            viewerApp._documentError(null);
             break;
           }
           pdfDataRangeTransport = new FirefoxComDataRangeTransport(
@@ -345,7 +350,7 @@ class FirefoxExternalServices extends DefaultExternalServices {
             args.filename
           );
 
-          callbacks.onOpenWithTransport(pdfDataRangeTransport);
+          viewerApp.open({ range: pdfDataRangeTransport });
           break;
         case "range":
           pdfDataRangeTransport.onDataRange(args.begin, args.chunk);
@@ -364,37 +369,29 @@ class FirefoxExternalServices extends DefaultExternalServices {
           pdfDataRangeTransport?.onDataProgressiveDone();
           break;
         case "progress":
-          callbacks.onProgress(args.loaded, args.total);
+          viewerApp.progress(args.loaded / args.total);
           break;
         case "complete":
           if (!args.data) {
-            callbacks.onError(args.errorCode);
+            viewerApp._documentError(null, { message: args.errorCode });
             break;
           }
-          callbacks.onOpenWithData(args.data, args.filename);
+          viewerApp.open({ data: args.data, filename: args.filename });
           break;
       }
     });
     FirefoxCom.request("initPassiveLoading", null);
   }
 
-  static reportTelemetry(data) {
-    FirefoxCom.request("reportTelemetry", JSON.stringify(data));
+  reportTelemetry(data) {
+    FirefoxCom.request("reportTelemetry", data);
   }
 
-  static createDownloadManager() {
-    return new DownloadManager();
-  }
-
-  static createPreferences() {
-    return new FirefoxPreferences();
-  }
-
-  static updateEditorStates(data) {
+  updateEditorStates(data) {
     FirefoxCom.request("updateEditorStates", data);
   }
 
-  static async createL10n() {
+  async createL10n() {
     const [localeProperties] = await Promise.all([
       FirefoxCom.requestAsync("getLocaleProperties", null),
       document.l10n.ready,
@@ -402,11 +399,14 @@ class FirefoxExternalServices extends DefaultExternalServices {
     return new L10n(localeProperties, document.l10n);
   }
 
-  static createScripting() {
+  createScripting() {
     return FirefoxScripting;
   }
 
-  static async getNimbusExperimentData() {
+  async getNimbusExperimentData() {
+    if (!PDFJSDev.test("GECKOVIEW")) {
+      return null;
+    }
     const nimbusData = await FirefoxCom.requestAsync(
       "getNimbusExperimentData",
       null
@@ -414,6 +414,5 @@ class FirefoxExternalServices extends DefaultExternalServices {
     return nimbusData && JSON.parse(nimbusData);
   }
 }
-PDFViewerApplication.externalServices = FirefoxExternalServices;
 
-export { DownloadManager, FirefoxCom };
+export { DownloadManager, ExternalServices, initCom, MLManager, Preferences };

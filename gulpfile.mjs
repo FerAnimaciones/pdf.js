@@ -14,6 +14,10 @@
  */
 /* eslint-env node */
 
+import {
+  babelPluginPDFJSPreprocessor,
+  preprocessPDFJSCode,
+} from "./external/builder/babel-plugin-pdfjs-preprocessor.mjs";
 import { exec, spawn, spawnSync } from "child_process";
 import autoprefixer from "autoprefixer";
 import babel from "@babel/core";
@@ -22,7 +26,6 @@ import { fileURLToPath } from "url";
 import fs from "fs";
 import gulp from "gulp";
 import merge from "merge-stream";
-import { mkdirp } from "mkdirp";
 import path from "path";
 import postcss from "gulp-postcss";
 import postcssDarkThemeClass from "postcss-dark-theme-class";
@@ -30,12 +33,12 @@ import postcssDirPseudoClass from "postcss-dir-pseudo-class";
 import postcssDiscardComments from "postcss-discard-comments";
 import postcssNesting from "postcss-nesting";
 import { preprocess } from "./external/builder/builder.mjs";
-import { preprocessPDFJSCode } from "./external/builder/preprocessor2.mjs";
 import rename from "gulp-rename";
 import replace from "gulp-replace";
 import rimraf from "rimraf";
 import stream from "stream";
 import streamqueue from "streamqueue";
+import TerserPlugin from "terser-webpack-plugin";
 import through from "through2";
 import Vinyl from "vinyl";
 import webpack2 from "webpack";
@@ -79,9 +82,9 @@ const config = JSON.parse(fs.readFileSync(CONFIG_FILE).toString());
 
 const ENV_TARGETS = [
   "last 2 versions",
-  "Chrome >= 92",
+  "Chrome >= 98",
   "Firefox ESR",
-  "Safari >= 15.4",
+  "Safari >= 16.4",
   "Node >= 18",
   "> 1%",
   "not IE > 0",
@@ -94,6 +97,13 @@ const AUTOPREFIXER_CONFIG = {
 };
 // Default Babel targets used for generic, components, minified-pre
 const BABEL_TARGETS = ENV_TARGETS.join(", ");
+
+const BABEL_PRESET_ENV_OPTS = Object.freeze({
+  corejs: "3.37.0",
+  exclude: ["web.structured-clone"],
+  shippedProposals: true,
+  useBuiltIns: "usage",
+});
 
 const DEFINES = Object.freeze({
   SKIP_BABEL: true,
@@ -120,9 +130,8 @@ function transform(charEncoding, transformFunction) {
   });
 }
 
-function safeSpawnSync(command, parameters, options) {
+function safeSpawnSync(command, parameters, options = {}) {
   // Execute all commands in a shell.
-  options = options || {};
   options.shell = true;
   // `options.shell = true` requires parameters to be quoted.
   parameters = parameters.map(param => {
@@ -171,6 +180,87 @@ function createStringSource(filename, content) {
   return source;
 }
 
+function createWebpackAlias(defines) {
+  const basicAlias = {
+    pdfjs: "src",
+    "pdfjs-web": "web",
+    "pdfjs-lib": "web/pdfjs",
+    "fluent-bundle": "node_modules/@fluent/bundle/esm/index.js",
+    "fluent-dom": "node_modules/@fluent/dom/esm/index.js",
+  };
+  const libraryAlias = {
+    "display-fetch_stream": "src/display/stubs.js",
+    "display-network": "src/display/stubs.js",
+    "display-node_stream": "src/display/stubs.js",
+    "display-node_utils": "src/display/stubs.js",
+  };
+  const viewerAlias = {
+    "web-alt_text_manager": "web/alt_text_manager.js",
+    "web-annotation_editor_params": "web/annotation_editor_params.js",
+    "web-download_manager": "",
+    "web-external_services": "",
+    "web-null_l10n": "",
+    "web-pdf_attachment_viewer": "web/pdf_attachment_viewer.js",
+    "web-pdf_cursor_tools": "web/pdf_cursor_tools.js",
+    "web-pdf_document_properties": "web/pdf_document_properties.js",
+    "web-pdf_find_bar": "web/pdf_find_bar.js",
+    "web-pdf_layer_viewer": "web/pdf_layer_viewer.js",
+    "web-pdf_outline_viewer": "web/pdf_outline_viewer.js",
+    "web-pdf_presentation_mode": "web/pdf_presentation_mode.js",
+    "web-pdf_sidebar": "web/pdf_sidebar.js",
+    "web-pdf_thumbnail_viewer": "web/pdf_thumbnail_viewer.js",
+    "web-preferences": "",
+    "web-print_service": "",
+    "web-secondary_toolbar": "web/secondary_toolbar.js",
+    "web-toolbar": "web/toolbar.js",
+  };
+
+  if (defines.CHROME) {
+    libraryAlias["display-fetch_stream"] = "src/display/fetch_stream.js";
+    libraryAlias["display-network"] = "src/display/network.js";
+
+    viewerAlias["web-download_manager"] = "web/download_manager.js";
+    viewerAlias["web-external_services"] = "web/chromecom.js";
+    viewerAlias["web-null_l10n"] = "web/l10n.js";
+    viewerAlias["web-preferences"] = "web/chromecom.js";
+    viewerAlias["web-print_service"] = "web/pdf_print_service.js";
+  } else if (defines.GENERIC) {
+    // Aliases defined here must also be replicated in the paths section of
+    // the tsconfig.json file for the type generation to work.
+    // In the tsconfig.json files, the .js extension must be omitted.
+    libraryAlias["display-fetch_stream"] = "src/display/fetch_stream.js";
+    libraryAlias["display-network"] = "src/display/network.js";
+    libraryAlias["display-node_stream"] = "src/display/node_stream.js";
+    libraryAlias["display-node_utils"] = "src/display/node_utils.js";
+
+    viewerAlias["web-download_manager"] = "web/download_manager.js";
+    viewerAlias["web-external_services"] = "web/genericcom.js";
+    viewerAlias["web-null_l10n"] = "web/genericl10n.js";
+    viewerAlias["web-preferences"] = "web/genericcom.js";
+    viewerAlias["web-print_service"] = "web/pdf_print_service.js";
+  } else if (defines.MOZCENTRAL) {
+    if (defines.GECKOVIEW) {
+      const gvAlias = {
+        "web-toolbar": "web/toolbar-geckoview.js",
+      };
+      for (const key in viewerAlias) {
+        viewerAlias[key] = gvAlias[key] || "web/stubs-geckoview.js";
+      }
+    }
+    viewerAlias["web-download_manager"] = "web/firefoxcom.js";
+    viewerAlias["web-external_services"] = "web/firefoxcom.js";
+    viewerAlias["web-null_l10n"] = "web/l10n.js";
+    viewerAlias["web-preferences"] = "web/firefoxcom.js";
+    viewerAlias["web-print_service"] = "web/firefox_print_service.js";
+  }
+
+  const alias = { ...basicAlias, ...libraryAlias, ...viewerAlias };
+  for (const key in alias) {
+    alias[key] = path.join(__dirname, alias[key]);
+  }
+  return alias;
+}
+
 function createWebpackConfig(
   defines,
   output,
@@ -204,30 +294,31 @@ function createWebpackConfig(
     !bundleDefines.MOZCENTRAL &&
     !bundleDefines.CHROME &&
     !bundleDefines.LIB &&
+    !bundleDefines.MINIFIED &&
     !bundleDefines.TESTING &&
     !disableSourceMaps;
   const isModule = output.library?.type === "module";
+  const isMinified = bundleDefines.MINIFIED;
   const skipBabel = bundleDefines.SKIP_BABEL;
 
-  // `core-js`, see https://github.com/zloirock/core-js/issues/514,
-  // should be excluded from processing.
-  const babelExcludes = ["node_modules[\\\\\\/]core-js"];
-  const babelExcludeRegExp = new RegExp(`(${babelExcludes.join("|")})`);
+  const babelExcludeRegExp = [
+    // `core-js`, see https://github.com/zloirock/core-js/issues/514,
+    // should be excluded from processing.
+    /node_modules[\\/]core-js/,
+  ];
 
   const babelPresets = skipBabel
     ? undefined
-    : [
-        [
-          "@babel/preset-env",
-          {
-            corejs: "3.35.0",
-            exclude: ["web.structured-clone"],
-            shippedProposals: true,
-            useBuiltIns: "usage",
-          },
-        ],
-      ];
-  const babelPlugins = [];
+    : [["@babel/preset-env", BABEL_PRESET_ENV_OPTS]];
+  const babelPlugins = [
+    [
+      babelPluginPDFJSPreprocessor,
+      {
+        rootPath: __dirname,
+        defines: bundleDefines,
+      },
+    ],
+  ];
 
   const plugins = [];
   if (!disableLicenseHeader) {
@@ -236,83 +327,38 @@ function createWebpackConfig(
     );
   }
 
+  const alias = createWebpackAlias(bundleDefines);
   const experiments = isModule ? { outputModule: true } : undefined;
 
   // Required to expose e.g., the `window` object.
   output.globalObject = "globalThis";
 
-  const basicAlias = {
-    pdfjs: "src",
-    "pdfjs-web": "web",
-    "pdfjs-lib": "web/pdfjs",
-    "fluent-bundle": "node_modules/@fluent/bundle/esm/index.js",
-    "fluent-dom": "node_modules/@fluent/dom/esm/index.js",
-  };
-  const libraryAlias = {
-    "display-fetch_stream": "src/display/stubs.js",
-    "display-network": "src/display/stubs.js",
-    "display-node_stream": "src/display/stubs.js",
-    "display-node_utils": "src/display/stubs.js",
-  };
-  const viewerAlias = {
-    "web-alt_text_manager": "web/alt_text_manager.js",
-    "web-annotation_editor_params": "web/annotation_editor_params.js",
-    "web-com": "",
-    "web-l10n_utils": "web/stubs.js",
-    "web-pdf_attachment_viewer": "web/pdf_attachment_viewer.js",
-    "web-pdf_cursor_tools": "web/pdf_cursor_tools.js",
-    "web-pdf_document_properties": "web/pdf_document_properties.js",
-    "web-pdf_find_bar": "web/pdf_find_bar.js",
-    "web-pdf_layer_viewer": "web/pdf_layer_viewer.js",
-    "web-pdf_outline_viewer": "web/pdf_outline_viewer.js",
-    "web-pdf_presentation_mode": "web/pdf_presentation_mode.js",
-    "web-pdf_sidebar": "web/pdf_sidebar.js",
-    "web-pdf_thumbnail_viewer": "web/pdf_thumbnail_viewer.js",
-    "web-print_service": "",
-    "web-secondary_toolbar": "web/secondary_toolbar.js",
-    "web-toolbar": "web/toolbar.js",
-  };
-  if (bundleDefines.CHROME) {
-    libraryAlias["display-fetch_stream"] = "src/display/fetch_stream.js";
-    libraryAlias["display-network"] = "src/display/network.js";
-
-    viewerAlias["web-com"] = "web/chromecom.js";
-    viewerAlias["web-print_service"] = "web/pdf_print_service.js";
-  } else if (bundleDefines.GENERIC) {
-    // Aliases defined here must also be replicated in the paths section of
-    // the tsconfig.json file for the type generation to work.
-    // In the tsconfig.json files, the .js extension must be omitted.
-    libraryAlias["display-fetch_stream"] = "src/display/fetch_stream.js";
-    libraryAlias["display-network"] = "src/display/network.js";
-    libraryAlias["display-node_stream"] = "src/display/node_stream.js";
-    libraryAlias["display-node_utils"] = "src/display/node_utils.js";
-
-    viewerAlias["web-com"] = "web/genericcom.js";
-    viewerAlias["web-l10n_utils"] = "web/l10n_utils.js";
-    viewerAlias["web-print_service"] = "web/pdf_print_service.js";
-  } else if (bundleDefines.MOZCENTRAL) {
-    if (bundleDefines.GECKOVIEW) {
-      const gvAlias = {
-        "web-l10n_utils": "web/stubs.js",
-        "web-toolbar": "web/toolbar-geckoview.js",
-      };
-      for (const key in viewerAlias) {
-        viewerAlias[key] = gvAlias[key] || "web/stubs-geckoview.js";
-      }
-    }
-    viewerAlias["web-com"] = "web/firefoxcom.js";
-    viewerAlias["web-print_service"] = "web/firefox_print_service.js";
-  }
-  const alias = { ...basicAlias, ...libraryAlias, ...viewerAlias };
-  for (const key in alias) {
-    alias[key] = path.join(__dirname, alias[key]);
-  }
-
   return {
     mode: "production",
     optimization: {
       mangleExports: false,
-      minimize: false,
+      minimize: isMinified,
+      minimizer: !isMinified
+        ? undefined
+        : [
+            new TerserPlugin({
+              extractComments: false,
+              parallel: false,
+              terserOptions: {
+                compress: {
+                  // V8 chokes on very long sequences, work around that.
+                  sequences: false,
+                },
+                mangle: {
+                  // Ensure that the `tweakWebpackOutput` function works.
+                  reserved: ["__webpack_exports__"],
+                },
+                keep_classnames: true,
+                keep_fnames: true,
+                module: isModule,
+              },
+            }),
+          ],
     },
     experiments,
     output,
@@ -333,14 +379,6 @@ function createWebpackConfig(
             presets: babelPresets,
             plugins: babelPlugins,
             targets: BABEL_TARGETS,
-          },
-        },
-        {
-          loader: path.join(__dirname, "external/webpack/pdfjsdev-loader.mjs"),
-          options: {
-            rootPath: __dirname,
-            saveComments: false,
-            defines: bundleDefines,
           },
         },
       ],
@@ -367,7 +405,7 @@ function checkChromePreferencesFile(chromePrefsPath, webPrefs) {
     // Deprecated keys are allowed in the managed preferences file.
     // The code maintainer is responsible for adding migration logic to
     // extensions/chromium/options/migration.js and web/chromecom.js .
-    return !description || !description.startsWith("DEPRECATED.");
+    return !description?.startsWith("DEPRECATED.");
   });
 
   let ret = true;
@@ -406,24 +444,24 @@ function checkChromePreferencesFile(chromePrefsPath, webPrefs) {
 }
 
 function tweakWebpackOutput(jsName) {
-  const replacer = ["__non_webpack_import__\\("];
-
-  if (jsName) {
-    replacer.push(
-      " __webpack_exports__ = {};",
-      " __webpack_exports__ = await __webpack_exports__;"
-    );
-  }
+  const replacer = [
+    " __webpack_exports__ = {};",
+    ",__webpack_exports__={};",
+    " __webpack_exports__ = await __webpack_exports__;",
+    "\\(__webpack_exports__=await __webpack_exports__\\)",
+  ];
   const regex = new RegExp(`(${replacer.join("|")})`, "gm");
 
   return replace(regex, match => {
     switch (match) {
-      case "__non_webpack_import__(":
-        return "import(/* webpackIgnore: true */ ";
       case " __webpack_exports__ = {};":
         return ` __webpack_exports__ = globalThis.${jsName} = {};`;
+      case ",__webpack_exports__={};":
+        return `,__webpack_exports__=globalThis.${jsName}={};`;
       case " __webpack_exports__ = await __webpack_exports__;":
         return ` __webpack_exports__ = globalThis.${jsName} = await (globalThis.${jsName}Promise = __webpack_exports__);`;
+      case "(__webpack_exports__=await __webpack_exports__)":
+        return `(__webpack_exports__=globalThis.${jsName}=await (globalThis.${jsName}Promise=__webpack_exports__))`;
     }
     return match;
   });
@@ -431,7 +469,7 @@ function tweakWebpackOutput(jsName) {
 
 function createMainBundle(defines) {
   const mainFileConfig = createWebpackConfig(defines, {
-    filename: "pdf.mjs",
+    filename: defines.MINIFIED ? "pdf.min.mjs" : "pdf.mjs",
     library: {
       type: "module",
     },
@@ -455,15 +493,13 @@ function createScriptingBundle(defines, extraOptions = undefined) {
   );
   return gulp
     .src("./src/pdf.scripting.js")
-    .pipe(webpack2Stream(scriptingFileConfig))
-    .pipe(tweakWebpackOutput());
+    .pipe(webpack2Stream(scriptingFileConfig));
 }
 
 function createSandboxExternal(defines) {
   const licenseHeader = fs.readFileSync("./src/license_header.js").toString();
 
   const ctx = {
-    saveComments: false,
     defines,
   };
   return gulp
@@ -479,7 +515,7 @@ function createSandboxExternal(defines) {
 
 function createTemporaryScriptingBundle(defines, extraOptions = undefined) {
   return createScriptingBundle(defines, {
-    disableVersionInfo: !!(extraOptions && extraOptions.disableVersionInfo),
+    disableVersionInfo: !!extraOptions?.disableVersionInfo,
     disableSourceMaps: true,
     disableLicenseHeader: true,
   }).pipe(gulp.dest(TMP_DIR));
@@ -497,7 +533,9 @@ function createSandboxBundle(defines, extraOptions = undefined) {
   const sandboxFileConfig = createWebpackConfig(
     sandboxDefines,
     {
-      filename: "pdf.sandbox.mjs",
+      filename: sandboxDefines.MINIFIED
+        ? "pdf.sandbox.min.mjs"
+        : "pdf.sandbox.mjs",
       library: {
         type: "module",
       },
@@ -513,7 +551,7 @@ function createSandboxBundle(defines, extraOptions = undefined) {
 
 function createWorkerBundle(defines) {
   const workerFileConfig = createWebpackConfig(defines, {
-    filename: "pdf.worker.mjs",
+    filename: defines.MINIFIED ? "pdf.worker.min.mjs" : "pdf.worker.mjs",
     library: {
       type: "module",
     },
@@ -537,10 +575,7 @@ function createWebBundle(defines, options) {
       defaultPreferencesDir: options.defaultPreferencesDir,
     }
   );
-  return gulp
-    .src("./web/viewer.js")
-    .pipe(webpack2Stream(viewerFileConfig))
-    .pipe(tweakWebpackOutput());
+  return gulp.src("./web/viewer.js").pipe(webpack2Stream(viewerFileConfig));
 }
 
 function createGVWebBundle(defines, options) {
@@ -558,8 +593,7 @@ function createGVWebBundle(defines, options) {
   );
   return gulp
     .src("./web/viewer-geckoview.js")
-    .pipe(webpack2Stream(viewerFileConfig))
-    .pipe(tweakWebpackOutput());
+    .pipe(webpack2Stream(viewerFileConfig));
 }
 
 function createComponentsBundle(defines) {
@@ -577,7 +611,9 @@ function createComponentsBundle(defines) {
 
 function createImageDecodersBundle(defines) {
   const componentsFileConfig = createWebpackConfig(defines, {
-    filename: "pdf.image_decoders.mjs",
+    filename: defines.MINIFIED
+      ? "pdf.image_decoders.min.mjs"
+      : "pdf.image_decoders.mjs",
     library: {
       type: "module",
     },
@@ -633,7 +669,7 @@ function replaceInFile(filePath, find, replacement) {
 }
 
 function getTempFile(prefix, suffix) {
-  mkdirp.sync(BUILD_DIR + "tmp/");
+  fs.mkdirSync(BUILD_DIR + "tmp/", { recursive: true });
   const bytes = crypto.randomBytes(6).toString("hex");
   const filePath = BUILD_DIR + "tmp/" + prefix + bytes + suffix;
   fs.writeFileSync(filePath, "");
@@ -691,6 +727,9 @@ function createTestSource(testsName, { bot = false, xfaOnly = false } = {}) {
 
     const testProcess = startNode(args, { cwd: TEST_DIR, stdio: "inherit" });
     testProcess.on("close", function (code) {
+      if (code !== 0) {
+        throw new Error(`Running ${testsName} tests failed.`);
+      }
       source.push(null);
     });
     return undefined;
@@ -722,6 +761,10 @@ function makeRef(done, bot) {
 
   const testProcess = startNode(args, { cwd: TEST_DIR, stdio: "inherit" });
   testProcess.on("close", function (code) {
+    if (code !== 0) {
+      done(new Error("Creating reference images failed."));
+      return;
+    }
     done();
   });
 }
@@ -821,11 +864,17 @@ async function parseDefaultPreferences(dir) {
     "./" + DEFAULT_PREFERENCES_DIR + dir + "app_options.mjs"
   );
 
-  const browserPrefs = AppOptions.getAll(OptionKind.BROWSER);
+  const browserPrefs = AppOptions.getAll(
+    OptionKind.BROWSER,
+    /* defaultOnly = */ true
+  );
   if (Object.keys(browserPrefs).length === 0) {
     throw new Error("No browser preferences found.");
   }
-  const prefs = AppOptions.getAll(OptionKind.PREFERENCE);
+  const prefs = AppOptions.getAll(
+    OptionKind.PREFERENCE,
+    /* defaultOnly = */ true
+  );
   if (Object.keys(prefs).length === 0) {
     throw new Error("No default preferences found.");
   }
@@ -876,7 +925,7 @@ gulp.task("locale", function () {
   console.log("### Building localization files");
 
   rimraf.sync(VIEWER_LOCALE_OUTPUT);
-  mkdirp.sync(VIEWER_LOCALE_OUTPUT);
+  fs.mkdirSync(VIEWER_LOCALE_OUTPUT, { recursive: true });
 
   const subfolders = fs.readdirSync(L10N_DIR);
   subfolders.sort();
@@ -892,7 +941,7 @@ gulp.task("locale", function () {
       continue;
     }
 
-    mkdirp.sync(VIEWER_LOCALE_OUTPUT + "/" + locale);
+    fs.mkdirSync(VIEWER_LOCALE_OUTPUT + "/" + locale, { recursive: true });
 
     locales.push(locale);
 
@@ -1079,7 +1128,8 @@ function buildComponents(defines, dir) {
     "web/images/loading-icon.gif",
     "web/images/altText_*.svg",
     "web/images/editor-toolbar-*.svg",
-    "web/images/toolbarButton-menuArrow.svg",
+    "web/images/toolbarButton-{editorHighlight,menuArrow}.svg",
+    "web/images/cursor-*.svg",
   ];
 
   return merge([
@@ -1169,68 +1219,6 @@ function buildMinified(defines, dir) {
   ]);
 }
 
-async function parseMinified(dir) {
-  const pdfFile = fs.readFileSync(dir + "build/pdf.mjs").toString();
-  const pdfWorkerFile = fs
-    .readFileSync(dir + "build/pdf.worker.mjs")
-    .toString();
-  const pdfSandboxFile = fs
-    .readFileSync(dir + "build/pdf.sandbox.mjs")
-    .toString();
-  const pdfImageDecodersFile = fs
-    .readFileSync(dir + "image_decoders/pdf.image_decoders.mjs")
-    .toString();
-
-  console.log();
-  console.log("### Minifying js files");
-
-  const { minify } = await import("terser");
-  const options = {
-    compress: {
-      // V8 chokes on very long sequences, work around that.
-      sequences: false,
-    },
-    keep_classnames: true,
-    keep_fnames: true,
-    module: true,
-  };
-
-  fs.writeFileSync(
-    dir + "build/pdf.min.mjs",
-    (await minify(pdfFile, options)).code
-  );
-  fs.writeFileSync(
-    dir + "build/pdf.worker.min.mjs",
-    (await minify(pdfWorkerFile, options)).code
-  );
-  fs.writeFileSync(
-    dir + "build/pdf.sandbox.min.mjs",
-    (await minify(pdfSandboxFile, options)).code
-  );
-  fs.writeFileSync(
-    dir + "image_decoders/pdf.image_decoders.min.mjs",
-    (await minify(pdfImageDecodersFile, options)).code
-  );
-
-  console.log();
-  console.log("### Cleaning js files");
-
-  fs.unlinkSync(dir + "build/pdf.mjs");
-  fs.unlinkSync(dir + "build/pdf.worker.mjs");
-  fs.unlinkSync(dir + "build/pdf.sandbox.mjs");
-
-  fs.renameSync(dir + "build/pdf.min.mjs", dir + "build/pdf.mjs");
-  fs.renameSync(dir + "build/pdf.worker.min.mjs", dir + "build/pdf.worker.mjs");
-  fs.renameSync(
-    dir + "build/pdf.sandbox.min.mjs",
-    dir + "build/pdf.sandbox.mjs"
-  );
-  fs.renameSync(
-    dir + "image_decoders/pdf.image_decoders.min.mjs",
-    dir + "image_decoders/pdf.image_decoders.mjs"
-  );
-}
-
 gulp.task(
   "minified",
   gulp.series(
@@ -1252,10 +1240,6 @@ gulp.task(
       const defines = { ...DEFINES, MINIFIED: true, GENERIC: true };
 
       return buildMinified(defines, MINIFIED_DIR);
-    },
-    async function compressMinified(done) {
-      await parseMinified(MINIFIED_DIR);
-      done();
     }
   )
 );
@@ -1291,10 +1275,6 @@ gulp.task(
       };
 
       return buildMinified(defines, MINIFIED_LEGACY_DIR);
-    },
-    async function compressMinifiedLegacy(done) {
-      await parseMinified(MINIFIED_LEGACY_DIR);
-      done();
     }
   )
 );
@@ -1530,14 +1510,15 @@ gulp.task("jsdoc", function (done) {
   const JSDOC_FILES = ["src/display/api.js"];
 
   rimraf(JSDOC_BUILD_DIR, function () {
-    mkdirp(JSDOC_BUILD_DIR).then(function () {
-      const command =
-        '"node_modules/.bin/jsdoc" -d ' +
-        JSDOC_BUILD_DIR +
-        " " +
-        JSDOC_FILES.join(" ");
-      exec(command, done);
-    });
+    fs.mkdirSync(JSDOC_BUILD_DIR, { recursive: true });
+
+    const command =
+      '"node_modules/.bin/jsdoc" -d ' +
+      JSDOC_BUILD_DIR +
+      " " +
+      JSDOC_FILES.join(" ");
+
+    exec(command, done);
   });
 });
 
@@ -1552,26 +1533,19 @@ gulp.task("types", function (done) {
 });
 
 function buildLibHelper(bundleDefines, inputStream, outputDir) {
-  function babelPluginReplaceNonWebpackImport(b) {
-    return {
-      visitor: {
-        Identifier(curPath, state) {
-          if (curPath.node.name === "__non_webpack_import__") {
-            curPath.replaceWith(b.types.identifier("import"));
-          }
-        },
-      },
-    };
-  }
   function preprocessLib(content) {
     const skipBabel = bundleDefines.SKIP_BABEL;
-    content = preprocessPDFJSCode(ctx, content);
     content = babel.transform(content, {
       sourceType: "module",
       presets: skipBabel
         ? undefined
-        : [["@babel/preset-env", { loose: false, modules: false }]],
-      plugins: [babelPluginReplaceNonWebpackImport],
+        : [
+            [
+              "@babel/preset-env",
+              { ...BABEL_PRESET_ENV_OPTS, loose: false, modules: false },
+            ],
+          ],
+      plugins: [[babelPluginPDFJSPreprocessor, ctx]],
       targets: BABEL_TARGETS,
     }).code;
     content = content.replaceAll(
@@ -1582,7 +1556,6 @@ function buildLibHelper(bundleDefines, inputStream, outputDir) {
   }
   const ctx = {
     rootPath: __dirname,
-    saveComments: false,
     defines: bundleDefines,
     map: {
       "pdfjs-lib": "../pdf.js",
@@ -1592,7 +1565,7 @@ function buildLibHelper(bundleDefines, inputStream, outputDir) {
       "display-node_utils": "./node_utils.js",
       "fluent-bundle": "../../../node_modules/@fluent/bundle/esm/index.js",
       "fluent-dom": "../../../node_modules/@fluent/dom/esm/index.js",
-      "web-l10n_utils": "../web/l10n_utils.js",
+      "web-null_l10n": "../web/genericl10n.js",
     },
   };
   const licenseHeaderLibre = fs
@@ -1630,6 +1603,7 @@ function buildLib(defines, dir) {
     ),
     gulp.src(["web/*.js", "!web/{pdfjs,viewer}.js"], { base: "." }),
     gulp.src("test/unit/*.js", { base: "." }),
+    gulp.src("external/openjpeg/*.js", { base: "openjpeg/" }),
   ]);
 
   return buildLibHelper(bundleDefines, inputStream, dir);
@@ -1889,7 +1863,7 @@ function createBaseline(done) {
 
   let initializeCommand = "git fetch origin";
   if (!checkDir(BASELINE_DIR)) {
-    mkdirp.sync(BASELINE_DIR);
+    fs.mkdirSync(BASELINE_DIR, { recursive: true });
     initializeCommand = "git clone ../../ .";
   }
 
@@ -1936,7 +1910,7 @@ gulp.task(
 
 gulp.task("lint", function (done) {
   console.log();
-  console.log("### Linting JS/CSS files");
+  console.log("### Linting JS/CSS/JSON files");
 
   // Ensure that we lint the Firefox specific *.jsm files too.
   const esLintOptions = [
@@ -1959,6 +1933,16 @@ gulp.task("lint", function (done) {
     styleLintOptions.push("--fix");
   }
 
+  const prettierOptions = [
+    "node_modules/prettier/bin/prettier.cjs",
+    "**/*.json",
+  ];
+  if (process.argv.includes("--fix")) {
+    prettierOptions.push("--log-level", "silent", "--write");
+  } else {
+    prettierOptions.push("--log-level", "warn", "--check");
+  }
+
   const esLintProcess = startNode(esLintOptions, { stdio: "inherit" });
   esLintProcess.on("close", function (esLintCode) {
     if (esLintCode !== 0) {
@@ -1972,8 +1956,16 @@ gulp.task("lint", function (done) {
         done(new Error("Stylelint failed."));
         return;
       }
-      console.log("files checked, no errors found");
-      done();
+
+      const prettierProcess = startNode(prettierOptions, { stdio: "inherit" });
+      prettierProcess.on("close", function (prettierCode) {
+        if (prettierCode !== 0) {
+          done(new Error("Prettier failed."));
+          return;
+        }
+        console.log("files checked, no errors found");
+        done();
+      });
     });
   });
 });
@@ -2063,8 +2055,7 @@ gulp.task(
       console.log("### Starting local server");
 
       const { WebServer } = await import("./test/webserver.mjs");
-      const server = new WebServer();
-      server.port = 8888;
+      const server = new WebServer({ port: 8888 });
       server.start();
     }
   )
@@ -2167,7 +2158,7 @@ function packageJson() {
     license: DIST_LICENSE,
     optionalDependencies: {
       canvas: "^2.11.2",
-      "path2d-polyfill": "^2.0.1",
+      path2d: "^0.2.0",
     },
     browser: {
       canvas: false,
@@ -2208,7 +2199,7 @@ gulp.task(
       console.log("### Cloning baseline distribution");
 
       rimraf.sync(DIST_DIR);
-      mkdirp.sync(DIST_DIR);
+      fs.mkdirSync(DIST_DIR, { recursive: true });
       safeSpawnSync("git", ["clone", "--depth", "1", DIST_REPO_URL, DIST_DIR]);
 
       console.log();
@@ -2245,36 +2236,20 @@ gulp.task(
           ])
           .pipe(gulp.dest(DIST_DIR + "legacy/build/")),
         gulp
-          .src(MINIFIED_DIR + "build/pdf.mjs")
-          .pipe(rename("pdf.min.mjs"))
+          .src(MINIFIED_DIR + "build/{pdf,pdf.worker,pdf.sandbox}.min.mjs")
           .pipe(gulp.dest(DIST_DIR + "build/")),
         gulp
-          .src(MINIFIED_DIR + "build/pdf.worker.mjs")
-          .pipe(rename("pdf.worker.min.mjs"))
-          .pipe(gulp.dest(DIST_DIR + "build/")),
-        gulp
-          .src(MINIFIED_DIR + "build/pdf.sandbox.mjs")
-          .pipe(rename("pdf.sandbox.min.mjs"))
-          .pipe(gulp.dest(DIST_DIR + "build/")),
-        gulp
-          .src(MINIFIED_DIR + "image_decoders/pdf.image_decoders.mjs")
-          .pipe(rename("pdf.image_decoders.min.mjs"))
+          .src(MINIFIED_DIR + "image_decoders/pdf.image_decoders.min.mjs")
           .pipe(gulp.dest(DIST_DIR + "image_decoders/")),
         gulp
-          .src(MINIFIED_LEGACY_DIR + "build/pdf.mjs")
-          .pipe(rename("pdf.min.mjs"))
+          .src(
+            MINIFIED_LEGACY_DIR + "build/{pdf,pdf.worker,pdf.sandbox}.min.mjs"
+          )
           .pipe(gulp.dest(DIST_DIR + "legacy/build/")),
         gulp
-          .src(MINIFIED_LEGACY_DIR + "build/pdf.worker.mjs")
-          .pipe(rename("pdf.worker.min.mjs"))
-          .pipe(gulp.dest(DIST_DIR + "legacy/build/")),
-        gulp
-          .src(MINIFIED_LEGACY_DIR + "build/pdf.sandbox.mjs")
-          .pipe(rename("pdf.sandbox.min.mjs"))
-          .pipe(gulp.dest(DIST_DIR + "legacy/build/")),
-        gulp
-          .src(MINIFIED_LEGACY_DIR + "image_decoders/pdf.image_decoders.mjs")
-          .pipe(rename("pdf.image_decoders.min.mjs"))
+          .src(
+            MINIFIED_LEGACY_DIR + "image_decoders/pdf.image_decoders.min.mjs"
+          )
           .pipe(gulp.dest(DIST_DIR + "legacy/image_decoders/")),
         gulp
           .src(COMPONENTS_DIR + "**/*", { base: COMPONENTS_DIR })
@@ -2372,7 +2347,7 @@ gulp.task(
 
     // Copy the mozcentral build to the mozcentral baseline directory.
     rimraf.sync(MOZCENTRAL_BASELINE_DIR);
-    mkdirp.sync(MOZCENTRAL_BASELINE_DIR);
+    fs.mkdirSync(MOZCENTRAL_BASELINE_DIR, { recursive: true });
 
     gulp
       .src([BASELINE_DIR + BUILD_DIR + "mozcentral/**/*"])

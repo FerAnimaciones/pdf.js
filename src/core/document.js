@@ -30,19 +30,32 @@ import {
   Util,
   warn,
 } from "../shared/util.js";
-import { AnnotationFactory, PopupAnnotation } from "./annotation.js";
+import {
+  AnnotationFactory,
+  PopupAnnotation,
+  WidgetAnnotation,
+} from "./annotation.js";
 import {
   collectActions,
   getInheritableProperty,
   getNewAnnotationsMap,
   isWhiteSpace,
+  lookupNormalRect,
   MissingDataException,
   PDF_VERSION_REGEXP,
   validateCSSFont,
   XRefEntryException,
   XRefParseException,
 } from "./core_utils.js";
-import { Dict, isName, isRefsEqual, Name, Ref, RefSet } from "./primitives.js";
+import {
+  Dict,
+  isName,
+  isRefsEqual,
+  Name,
+  Ref,
+  RefSet,
+  RefSetCache,
+} from "./primitives.js";
 import { getXfaFontDict, getXfaFontName } from "./xfa_fonts.js";
 import { BaseStream } from "./base_stream.js";
 import { calculateMD5 } from "./crypto.js";
@@ -148,10 +161,12 @@ class Page {
     if (this.xfaData) {
       return this.xfaData.bbox;
     }
-    let box = this._getInheritableProperty(name, /* getArray = */ true);
+    const box = lookupNormalRect(
+      this._getInheritableProperty(name, /* getArray = */ true),
+      null
+    );
 
-    if (Array.isArray(box) && box.length === 4) {
-      box = Util.normalizeRect(box);
+    if (box) {
       if (box[2] - box[0] > 0 && box[3] - box[1] > 0) {
         return box;
       }
@@ -268,7 +283,7 @@ class Page {
           continue;
         }
         if (annotation.deleted) {
-          deletedAnnotations.put(ref);
+          deletedAnnotations.put(ref, ref);
           continue;
         }
         existingAnnotations?.put(ref);
@@ -296,7 +311,7 @@ class Page {
       options: this.evaluatorOptions,
     });
 
-    const deletedAnnotations = new RefSet();
+    const deletedAnnotations = new RefSetCache();
     const existingAnnotations = new RefSet();
     this.#replaceIdByRef(annotations, deletedAnnotations, existingAnnotations);
 
@@ -331,6 +346,9 @@ class Page {
       { ref: this.ref, data: buffer.join("") },
       ...newData.annotations
     );
+    for (const deletedRef of deletedAnnotations) {
+      objects.push({ ref: deletedRef, data: null });
+    }
 
     return objects;
   }
@@ -766,11 +784,15 @@ class Page {
         }
 
         const sortedAnnotations = [];
-        let popupAnnotations;
+        let popupAnnotations, widgetAnnotations;
         // Ensure that PopupAnnotations are handled last, since they depend on
         // their parent Annotation in the display layer; fixes issue 11362.
         for (const annotation of await Promise.all(annotationPromises)) {
           if (!annotation) {
+            continue;
+          }
+          if (annotation instanceof WidgetAnnotation) {
+            (widgetAnnotations ||= []).push(annotation);
             continue;
           }
           if (annotation instanceof PopupAnnotation) {
@@ -778,6 +800,9 @@ class Page {
             continue;
           }
           sortedAnnotations.push(annotation);
+        }
+        if (widgetAnnotations) {
+          sortedAnnotations.push(...widgetAnnotations);
         }
         if (popupAnnotations) {
           sortedAnnotations.push(...popupAnnotations);
@@ -930,7 +955,14 @@ class PDFDocument {
       // Find the end of the first object.
       stream.reset();
       if (find(stream, ENDOBJ_SIGNATURE)) {
-        startXRef = stream.pos + 6 - stream.start;
+        stream.skip(6);
+
+        let ch = stream.peekByte();
+        while (isWhiteSpace(ch)) {
+          stream.pos++;
+          ch = stream.peekByte();
+        }
+        startXRef = stream.pos - stream.start;
       }
     } else {
       // Find `startxref` by checking backwards from the end of the file.
@@ -1577,6 +1609,7 @@ class PDFDocument {
     } else {
       promise = catalog.getPageDict(pageIndex);
     }
+    // eslint-disable-next-line arrow-body-style
     promise = promise.then(([pageDict, ref]) => {
       return new Page({
         pdfManager: this.pdfManager,
