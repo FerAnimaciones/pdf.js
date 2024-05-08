@@ -34,7 +34,6 @@ import {
   AnnotationMode,
   PermissionFlag,
   PixelsPerInch,
-  PromiseCapability,
   shadow,
   version,
 } from "pdfjs-lib";
@@ -63,7 +62,7 @@ import {
   VERTICAL_PADDING,
   watchScroll,
 } from "./ui_utils.js";
-import { NullL10n } from "web-l10n_utils";
+import { GenericL10n } from "web-null_l10n";
 import { PDFPageView } from "./pdf_page_view.js";
 import { PDFRenderingQueue } from "./pdf_rendering_queue.js";
 import { SimpleLinkService } from "./pdf_link_service.js";
@@ -117,7 +116,7 @@ function isValidAnnotationEditorMode(mode) {
  *   landscape pages upon printing. The default is `false`.
  * @property {number} [maxCanvasPixels] - The maximum supported canvas size in
  *   total pixels, i.e. width * height. Use `-1` for no limit, or `0` for
- *   CSS-only zooming. The default value is 4096 * 4096 (16 mega-pixels).
+ *   CSS-only zooming. The default value is 4096 * 8192 (32 mega-pixels).
  * @property {IL10n} [l10n] - Localization service.
  * @property {boolean} [enablePermissions] - Enables PDF document permissions,
  *   when they exist. The default value is `false`.
@@ -214,7 +213,11 @@ class PDFViewer {
 
   #copyCallbackBound = null;
 
+  #enableHighlightFloatingButton = false;
+
   #enablePermissions = false;
+
+  #mlManager = null;
 
   #getAllTextInProgress = false;
 
@@ -280,15 +283,21 @@ class PDFViewer {
       options.annotationEditorMode ?? AnnotationEditorType.NONE;
     this.#annotationEditorHighlightColors =
       options.annotationEditorHighlightColors || null;
+    this.#enableHighlightFloatingButton =
+      options.enableHighlightFloatingButton === true;
     this.imageResourcesPath = options.imageResourcesPath || "";
     this.enablePrintAutoRotate = options.enablePrintAutoRotate || false;
     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
       this.removePageBorders = options.removePageBorders || false;
     }
     this.maxCanvasPixels = options.maxCanvasPixels;
-    this.l10n = options.l10n || NullL10n;
+    this.l10n = options.l10n;
+    if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
+      this.l10n ||= new GenericL10n();
+    }
     this.#enablePermissions = options.enablePermissions || false;
     this.pageColors = options.pageColors || null;
+    this.#mlManager = options.mlManager || null;
 
     this.defaultRenderingQueue = !options.renderingQueue;
     if (
@@ -327,7 +336,7 @@ class PDFViewer {
 
     if (
       (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) &&
-      this.l10n === NullL10n
+      !options.l10n
     ) {
       // Ensure that Fluent is connected in e.g. the COMPONENTS build.
       this.l10n.translate(this.container);
@@ -352,10 +361,7 @@ class PDFViewer {
   get pageViewsReady() {
     // Prevent printing errors when 'disableAutoFetch' is set, by ensuring
     // that *all* pages have in fact been completely loaded.
-    return (
-      this._pagesCapability.settled &&
-      this._pages.every(pageView => pageView?.pdfPage)
-    );
+    return this._pages.every(pageView => pageView?.pdfPage);
   }
 
   /**
@@ -619,7 +625,7 @@ class PDFViewer {
     return params;
   }
 
-  #onePageRenderedOrForceFetch() {
+  async #onePageRenderedOrForceFetch() {
     // Unless the viewer *and* its pages are visible, rendering won't start and
     // `this._onePageRenderedCapability` thus won't be resolved.
     // To ensure that automatic printing, on document load, still works even in
@@ -635,7 +641,7 @@ class PDFViewer {
       !this.container.offsetParent ||
       this._getVisiblePages().views.length === 0
     ) {
-      return Promise.resolve();
+      return;
     }
 
     // Handle the window/tab becoming inactive *after* rendering has started;
@@ -646,20 +652,17 @@ class PDFViewer {
           return;
         }
         resolve();
-
-        document.removeEventListener(
-          "visibilitychange",
-          this.#onVisibilityChange
-        );
-        this.#onVisibilityChange = null;
       };
       document.addEventListener("visibilitychange", this.#onVisibilityChange);
     });
 
-    return Promise.race([
+    await Promise.race([
       this._onePageRenderedCapability.promise,
       visibilityChangePromise,
     ]);
+    // Ensure that the "visibilitychange" listener is always removed.
+    document.removeEventListener("visibilitychange", this.#onVisibilityChange);
+    this.#onVisibilityChange = null;
   }
 
   async getAllText() {
@@ -778,7 +781,9 @@ class PDFViewer {
     const pagesCount = pdfDocument.numPages;
     const firstPagePromise = pdfDocument.getPage(1);
     // Rendering (potentially) depends on this, hence fetching it immediately.
-    const optionalContentConfigPromise = pdfDocument.getOptionalContentConfig();
+    const optionalContentConfigPromise = pdfDocument.getOptionalContentConfig({
+      intent: "display",
+    });
     const permissionsPromise = this.#enablePermissions
       ? pdfDocument.getPermissions()
       : Promise.resolve();
@@ -814,21 +819,13 @@ class PDFViewer {
     this.eventBus._on("pagerender", this._onBeforeDraw);
 
     this._onAfterDraw = evt => {
-      if (evt.cssTransform || this._onePageRenderedCapability.settled) {
+      if (evt.cssTransform) {
         return;
       }
       this._onePageRenderedCapability.resolve({ timestamp: evt.timestamp });
 
       this.eventBus._off("pagerendered", this._onAfterDraw);
       this._onAfterDraw = null;
-
-      if (this.#onVisibilityChange) {
-        document.removeEventListener(
-          "visibilitychange",
-          this.#onVisibilityChange
-        );
-        this.#onVisibilityChange = null;
-      }
     };
     this.eventBus._on("pagerendered", this._onAfterDraw);
 
@@ -865,7 +862,9 @@ class PDFViewer {
               this.eventBus,
               pdfDocument,
               this.pageColors,
-              this.#annotationEditorHighlightColors
+              this.#annotationEditorHighlightColors,
+              this.#enableHighlightFloatingButton,
+              this.#mlManager
             );
             this.eventBus.dispatch("annotationeditoruimanager", {
               source: this,
@@ -895,10 +894,21 @@ class PDFViewer {
           this.viewer.style.setProperty(
             "--hcm-highlight-filter",
             pdfDocument.filterFactory.addHighlightHCMFilter(
+              "highlight",
               "CanvasText",
               "Canvas",
               "HighlightText",
               "Highlight"
+            )
+          );
+          this.viewer.style.setProperty(
+            "--hcm-highlight-selected-filter",
+            pdfDocument.filterFactory.addHighlightHCMFilter(
+              "highlight_selected",
+              "CanvasText",
+              "Canvas",
+              "HighlightText",
+              "ButtonText"
             )
           );
         }
@@ -925,11 +935,7 @@ class PDFViewer {
         // Set the first `pdfPage` immediately, since it's already loaded,
         // rather than having to repeat the `PDFDocumentProxy.getPage` call in
         // the `this.#ensurePdfPageLoaded` method before rendering can start.
-        const firstPageView = this._pages[0];
-        if (firstPageView) {
-          firstPageView.setPdfPage(firstPdfPage);
-          this.linkService.cachePageRef(1, firstPdfPage.ref);
-        }
+        this._pages[0]?.setPdfPage(firstPdfPage);
 
         if (this._scrollMode === ScrollMode.PAGE) {
           // Ensure that the current page becomes visible on document load.
@@ -984,7 +990,6 @@ class PDFViewer {
                 if (!pageView.pdfPage) {
                   pageView.setPdfPage(pdfPage);
                 }
-                this.linkService.cachePageRef(pageNum, pdfPage.ref);
                 if (--getPagesLeft === 0) {
                   this._pagesCapability.resolve();
                 }
@@ -1061,9 +1066,9 @@ class PDFViewer {
     this._location = null;
     this._pagesRotation = 0;
     this._optionalContentConfigPromise = null;
-    this._firstPageCapability = new PromiseCapability();
-    this._onePageRenderedCapability = new PromiseCapability();
-    this._pagesCapability = new PromiseCapability();
+    this._firstPageCapability = Promise.withResolvers();
+    this._onePageRenderedCapability = Promise.withResolvers();
+    this._pagesCapability = Promise.withResolvers();
     this._scrollMode = ScrollMode.VERTICAL;
     this._previousScrollMode = ScrollMode.UNKNOWN;
     this._spreadMode = SpreadMode.NONE;
@@ -1708,9 +1713,6 @@ class PDFViewer {
       if (!pageView.pdfPage) {
         pageView.setPdfPage(pdfPage);
       }
-      if (!this.linkService._cachedPageNumber?.(pdfPage.ref)) {
-        this.linkService.cachePageRef(pageView.id, pdfPage.ref);
-      }
       return pdfPage;
     } catch (reason) {
       console.error("Unable to get page for page view", reason);
@@ -1815,7 +1817,7 @@ class PDFViewer {
       console.error("optionalContentConfigPromise: Not initialized yet.");
       // Prevent issues if the getter is accessed *before* the `onePageRendered`
       // promise has resolved; won't (normally) happen in the default viewer.
-      return this.pdfDocument.getOptionalContentConfig();
+      return this.pdfDocument.getOptionalContentConfig({ intent: "display" });
     }
     return this._optionalContentConfigPromise;
   }

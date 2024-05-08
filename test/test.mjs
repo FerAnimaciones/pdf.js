@@ -15,39 +15,20 @@
  */
 /* eslint-disable no-var */
 
-import { copySubtreeSync, ensureDirSync, removeDirSync } from "./testutils.mjs";
+import { copySubtreeSync, ensureDirSync } from "./testutils.mjs";
 import {
   downloadManifestFiles,
   verifyManifestFiles,
 } from "./downloadutils.mjs";
-import dns from "dns";
 import fs from "fs";
 import os from "os";
 import path from "path";
 import puppeteer from "puppeteer";
 import readline from "readline";
-import rimraf from "rimraf";
 import { translateFont } from "./font/ttxdriver.mjs";
 import url from "url";
 import { WebServer } from "./webserver.mjs";
 import yargs from "yargs";
-
-const rimrafSync = rimraf.sync;
-
-// Chrome uses host `127.0.0.1` in the browser's websocket endpoint URL while
-// Firefox uses `localhost`, which before Node.js 17 also resolved to the IPv4
-// address `127.0.0.1` by Node.js' DNS resolver. However, this behavior changed
-// in Node.js 17 where the default is to prefer an IPv6 address if one is
-// offered (which varies based on the OS and/or how the `localhost` hostname
-// resolution is configured), so it can now also resolve to `::1`. This causes
-// Firefox to not start anymore since it doesn't bind on the `::1` interface.
-// To avoid this, we switch Node.js' DNS resolver back to preferring IPv4
-// since we connect to a local browser anyway. Only do this for Node.js versions
-// that actually have this API since it got introduced in Node.js 14.18.0 and
-// it's not relevant for older versions anyway.
-if (dns.setDefaultResultOrder !== undefined) {
-  dns.setDefaultResultOrder("ipv4first");
-}
 
 function parseOptions() {
   const parsedArgs = yargs(process.argv)
@@ -229,7 +210,7 @@ function updateRefImages() {
     console.log("  Updating ref/ ... ");
     copySubtreeSync(refsTmpDir, refsDir);
     if (removeTmp) {
-      removeDirSync(refsTmpDir);
+      fs.rmSync(refsTmpDir, { recursive: true, force: true });
     }
     console.log("done");
   }
@@ -340,7 +321,7 @@ async function startRefTest(masterMode, showRefImages) {
       fs.unlinkSync(eqLog);
     }
     if (fs.existsSync(testResultDir)) {
-      removeDirSync(testResultDir);
+      fs.rmSync(testResultDir, { recursive: true, force: true });
     }
 
     startTime = Date.now();
@@ -374,7 +355,7 @@ async function startRefTest(masterMode, showRefImages) {
   function checkRefsTmp() {
     if (masterMode && fs.existsSync(refsTmpDir)) {
       if (options.noPrompts) {
-        removeDirSync(refsTmpDir);
+        fs.rmSync(refsTmpDir, { recursive: true, force: true });
         setup();
         return;
       }
@@ -386,7 +367,7 @@ async function startRefTest(masterMode, showRefImages) {
         "SHOULD THIS SCRIPT REMOVE tmp/? THINK CAREFULLY [yn] ",
         function (answer) {
           if (answer.toLowerCase() === "y") {
-            removeDirSync(refsTmpDir);
+            fs.rmSync(refsTmpDir, { recursive: true, force: true });
           }
           setup();
           reader.close();
@@ -856,24 +837,14 @@ function unitTestPostHandler(req, res) {
   req.on("data", function (data) {
     body += data;
   });
-  req.on("end", function () {
+  req.on("end", async function () {
     if (pathname === "/ttx") {
-      var onCancel = null,
-        ttxTimeout = 10000;
-      var timeoutId = setTimeout(function () {
-        onCancel?.("TTX timeout");
-      }, ttxTimeout);
-      translateFont(
-        body,
-        function (fn) {
-          onCancel = fn;
-        },
-        function (err, xml) {
-          clearTimeout(timeoutId);
-          res.writeHead(200, { "Content-Type": "text/xml" });
-          res.end(err ? "<error>" + err + "</error>" : xml);
-        }
-      );
+      res.writeHead(200, { "Content-Type": "text/xml" });
+      try {
+        res.end(await translateFont(body));
+      } catch (error) {
+        res.end(`<error>${error}</error>`);
+      }
       return;
     }
 
@@ -908,9 +879,7 @@ async function startBrowser({ browserName, headless, startUrl }) {
   const options = {
     product: browserName,
     protocol: "cdp",
-    // Note that using `headless: true` gives a deprecation warning; see
-    // https://github.com/puppeteer/puppeteer#default-runtime-settings.
-    headless: headless === true ? "new" : false,
+    headless,
     defaultViewport: null,
     ignoreDefaultArgs: ["--disable-extensions"],
     // The timeout for individual protocol (CDP) calls should always be lower
@@ -967,6 +936,8 @@ async function startBrowser({ browserName, headless, startUrl }) {
       "layout.css.round.enabled": true,
       // This allow to copy some data in the clipboard.
       "dom.events.asyncClipboard.clipboardItem": true,
+      // It's helpful to see where the caret is.
+      "accessibility.browsewithcaret": true,
     };
   }
 
@@ -1033,11 +1004,12 @@ async function startBrowsers({ baseUrl, initializeSession }) {
 }
 
 function startServer() {
-  server = new WebServer();
-  server.host = host;
-  server.port = options.port;
-  server.root = "..";
-  server.cacheExpirationTime = 3600;
+  server = new WebServer({
+    root: "..",
+    host,
+    port: options.port,
+    cacheExpirationTime: 3600,
+  });
   server.start();
 }
 
@@ -1063,7 +1035,7 @@ async function closeSession(browser) {
     });
     if (allClosed) {
       if (tempDir) {
-        rimrafSync(tempDir);
+        fs.rmSync(tempDir, { recursive: true, force: true });
       }
       onAllSessionsClosed?.();
     }

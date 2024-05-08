@@ -106,12 +106,6 @@ class IPDFLinkService {
    * @param {Object} action
    */
   executeSetOCGState(action) {}
-
-  /**
-   * @param {number} pageNum - page number.
-   * @param {Object} pageRef - reference to the page.
-   */
-  cachePageRef(pageNum, pageRef) {}
 }
 
 /**
@@ -217,4 +211,25 @@ class IL10n {
   resume() {}
 }
 
-export { IDownloadManager, IL10n, IPDFLinkService, IRenderableView };
+/**
+ * @interface
+ */
+class IPDFPrintServiceFactory {
+  static initGlobals() {}
+
+  static get supportsPrinting() {
+    return false;
+  }
+
+  static createPrintService() {
+    throw new Error("Not implemented: createPrintService");
+  }
+}
+
+export {
+  IDownloadManager,
+  IL10n,
+  IPDFLinkService,
+  IPDFPrintServiceFactory,
+  IRenderableView,
+};

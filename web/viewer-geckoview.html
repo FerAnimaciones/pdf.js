@@ -60,8 +60,9 @@ See https://github.com/adobe-type-tools/cmap-resources
 
           "web-alt_text_manager": "./stubs-geckoview.js",
           "web-annotation_editor_params": "./stubs-geckoview.js",
-          "web-com": "./genericcom.js",
-          "web-l10n_utils": "./l10n_utils.js",
+          "web-download_manager": "./download_manager.js",
+          "web-external_services": "./genericcom.js",
+          "web-null_l10n": "./genericl10n.js",
           "web-pdf_attachment_viewer": "./stubs-geckoview.js",
           "web-pdf_cursor_tools": "./stubs-geckoview.js",
           "web-pdf_document_properties": "./stubs-geckoview.js",
@@ -71,6 +72,7 @@ See https://github.com/adobe-type-tools/cmap-resources
           "web-pdf_presentation_mode": "./stubs-geckoview.js",
           "web-pdf_sidebar": "./stubs-geckoview.js",
           "web-pdf_thumbnail_viewer": "./stubs-geckoview.js",
+          "web-preferences": "./genericcom.js",
           "web-print_service": "./pdf_print_service.js",
           "web-secondary_toolbar": "./stubs-geckoview.js",
           "web-toolbar": "./toolbar-geckoview.js"
@@ -92,9 +94,6 @@ See https://github.com/adobe-type-tools/cmap-resources
         <div id="floatingToolbar">
           <button id="download" class="toolbarButton" title="Download" tabindex="31" data-l10n-id="pdfjs-download-button">
             <span data-l10n-id="pdfjs-download-button-label">Download</span>
-          </button>
-          <button id="openInApp" class="toolbarButton" title="Open in app" tabindex="32" data-l10n-id="pdfjs-open-in-app-button">
-            <span data-l10n-id="pdfjs-open-in-app-button-label">Open in app</span>
           </button>
         </div>
 
@@ -120,10 +119,5 @@ See https://github.com/adobe-type-tools/cmap-resources
 
     </div> <!-- outerContainer -->
     <div id="printContainer"></div>
-
-<!--#if !MOZCENTRAL-->
-    <input type="file" id="fileInput" class="hidden">
-<!--#endif-->
-
   </body>
 </html>

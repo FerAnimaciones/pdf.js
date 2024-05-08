@@ -17,8 +17,6 @@ import {
   bytesToString,
   createValidAbsoluteUrl,
   getModificationDate,
-  isArrayBuffer,
-  PromiseCapability,
   string32,
   stringToBytes,
   stringToPDFString,
@@ -50,20 +48,6 @@ describe("util", function () {
       const string = "a".repeat(length);
 
       expect(bytesToString(bytes)).toEqual(string);
-    });
-  });
-
-  describe("isArrayBuffer", function () {
-    it("handles array buffer values", function () {
-      expect(isArrayBuffer(new ArrayBuffer(0))).toEqual(true);
-      expect(isArrayBuffer(new Uint8Array(0))).toEqual(true);
-    });
-
-    it("handles non-array buffer values", function () {
-      expect(isArrayBuffer("true")).toEqual(false);
-      expect(isArrayBuffer(1)).toEqual(false);
-      expect(isArrayBuffer(null)).toEqual(false);
-      expect(isArrayBuffer(undefined)).toEqual(false);
     });
   });
 
@@ -235,37 +219,6 @@ describe("util", function () {
         new URL("tel:+0123456789")
       );
       expect(createValidAbsoluteUrl("/foo", "tel:0123456789")).toEqual(null);
-    });
-  });
-
-  describe("PromiseCapability", function () {
-    it("should resolve with correct data", async function () {
-      const promiseCapability = new PromiseCapability();
-      expect(promiseCapability.settled).toEqual(false);
-
-      promiseCapability.resolve({ test: "abc" });
-
-      const data = await promiseCapability.promise;
-      expect(promiseCapability.settled).toEqual(true);
-      expect(data).toEqual({ test: "abc" });
-    });
-
-    it("should reject with correct reason", async function () {
-      const promiseCapability = new PromiseCapability();
-      expect(promiseCapability.settled).toEqual(false);
-
-      promiseCapability.reject(new Error("reason"));
-
-      try {
-        await promiseCapability.promise;
-
-        // Shouldn't get here.
-        expect(false).toEqual(true);
-      } catch (reason) {
-        expect(promiseCapability.settled).toEqual(true);
-        expect(reason instanceof Error).toEqual(true);
-        expect(reason.message).toEqual("reason");
-      }
     });
   });
 

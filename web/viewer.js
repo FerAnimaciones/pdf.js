@@ -13,8 +13,6 @@
  * limitations under the License.
  */
 
-import "web-com";
-import "web-print_service";
 import { RenderingStates, ScrollMode, SpreadMode } from "./ui_utils.js";
 import { AppOptions } from "./app_options.js";
 import { LinkTarget } from "./pdf_link_service.js";
@@ -172,13 +170,12 @@ function getViewerConfiguration() {
       editorInkThickness: document.getElementById("editorInkThickness"),
       editorInkOpacity: document.getElementById("editorInkOpacity"),
       editorStampAddImage: document.getElementById("editorStampAddImage"),
+      editorFreeHighlightThickness: document.getElementById(
+        "editorFreeHighlightThickness"
+      ),
+      editorHighlightShowAll: document.getElementById("editorHighlightShowAll"),
     },
     printContainer: document.getElementById("printContainer"),
-    openFileInput:
-      typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")
-        ? document.getElementById("fileInput")
-        : null,
-    debuggerScriptPath: "./debugger.mjs",
   };
 }
 

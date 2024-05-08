@@ -22,7 +22,6 @@ const {
   GlobalWorkerOptions,
   Outliner,
   PixelsPerInch,
-  PromiseCapability,
   renderTextLayer,
   shadow,
   XfaLayer,
@@ -106,6 +105,7 @@ async function inlineImages(node, silentErrors = false) {
           }
           return response.blob();
         })
+        // eslint-disable-next-line arrow-body-style
         .then(blob => {
           return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -117,6 +117,7 @@ async function inlineImages(node, silentErrors = false) {
             reader.readAsDataURL(blob);
           });
         })
+        // eslint-disable-next-line arrow-body-style
         .then(dataUrl => {
           return new Promise((resolve, reject) => {
             image.onload = resolve;
@@ -682,7 +683,9 @@ class Driver {
             }
 
             task.pdfDoc = doc;
-            task.optionalContentConfigPromise = doc.getOptionalContentConfig();
+            task.optionalContentConfigPromise = doc.getOptionalContentConfig({
+              intent: task.print ? "print" : "display",
+            });
 
             if (task.optionalContent) {
               const entries = Object.entries(task.optionalContent),
@@ -743,7 +746,7 @@ class Driver {
     if (!("message" in e)) {
       return JSON.stringify(e);
     }
-    return e.message + ("stack" in e ? " at " + e.stack.split("\n")[0] : "");
+    return e.message + ("stack" in e ? " at " + e.stack.split("\n", 1)[0] : "");
   }
 
   _getLastPageNumber(task) {
@@ -1108,7 +1111,7 @@ class Driver {
   }
 
   _send(url, message) {
-    const capability = new PromiseCapability();
+    const { promise, resolve } = Promise.withResolvers();
     this.inflight.textContent = this.inFlightRequests++;
 
     fetch(url, {
@@ -1125,18 +1128,18 @@ class Driver {
         }
 
         this.inFlightRequests--;
-        capability.resolve();
+        resolve();
       })
       .catch(reason => {
         console.warn(`Driver._send failed (${url}): ${reason}`);
 
         this.inFlightRequests--;
-        capability.resolve();
+        resolve();
 
         this._send(url, message);
       });
 
-    return capability.promise;
+    return promise;
   }
 }
 
