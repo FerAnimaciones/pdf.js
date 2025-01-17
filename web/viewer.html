@@ -711,10 +711,10 @@ See https://github.com/adobe-type-tools/cmap-resources
             const urlParams = new URLSearchParams(window.location.search);
 
             if (urlParams.get("print") == "false") {
-              document.getElementById("print").hidden = true;
+              document.getElementById("printButton").hidden = true;
             }
             if (urlParams.get("download") == "false") {
-              document.getElementById("download").hidden = true;
+              document.getElementById("downloadButton").hidden = true;
             }
             if (urlParams.get("editor") == "false") {
               document.getElementById("editorModeButtons").hidden = true;
