@@ -1,4 +1,10 @@
-# NPM INSTLL
+# NPM INSTALL GULP
+
+```
+npm install --global gulp-cli
+```
+
+# NPM INSTALL
 
 Verificar la cache si no permite instalar paquetes.
 ```
