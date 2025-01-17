@@ -26,6 +26,7 @@ import {
 import { CFFCompiler, CFFParser } from "./cff_parser.js";
 import {
   FontFlags,
+  getVerticalPresentationForm,
   MacStandardGlyphOrdering,
   normalizeFontName,
   recoverGlyphName,
@@ -484,8 +485,7 @@ function adjustMapping(charCodeToGlyphId, hasGlyph, newGlyphZeroId, toUnicode) {
   const isInPrivateArea = code =>
     (PRIVATE_USE_AREAS[0][0] <= code && code <= PRIVATE_USE_AREAS[0][1]) ||
     (PRIVATE_USE_AREAS[1][0] <= code && code <= PRIVATE_USE_AREAS[1][1]);
-  for (let originalCharCode in charCodeToGlyphId) {
-    originalCharCode |= 0;
+  for (const originalCharCode in charCodeToGlyphId) {
     let glyphId = charCodeToGlyphId[originalCharCode];
     // For missing glyphs don't create the mappings so the glyph isn't
     // drawn.
@@ -799,7 +799,9 @@ function createOS2Table(properties, charstrings, override) {
   const bbox = properties.bbox || [0, 0, 0, 0];
   const unitsPerEm =
     override.unitsPerEm ||
-    1 / (properties.fontMatrix || FONT_IDENTITY_MATRIX)[0];
+    (properties.fontMatrix
+      ? 1 / Math.max(...properties.fontMatrix.slice(0, 4).map(Math.abs))
+      : 1000);
 
   // if the font units differ to the PDF glyph space units
   // then scale up the values
@@ -1242,7 +1244,7 @@ class Font {
         getDingbatsGlyphsUnicode(),
         this.differences
       );
-    } else if (isStandardFont) {
+    } else if (isStandardFont || isMappedToStandardFont) {
       const map = buildToFontChar(
         this.defaultEncoding,
         getGlyphsUnicode(),
@@ -1758,17 +1760,22 @@ class Font {
       mappings.sort(function (a, b) {
         return a.charCode - b.charCode;
       });
-      for (let i = 1; i < mappings.length; i++) {
-        if (mappings[i - 1].charCode === mappings[i].charCode) {
-          mappings.splice(i, 1);
-          i--;
+      const finalMappings = [],
+        seenCharCodes = new Set();
+      for (const map of mappings) {
+        const { charCode } = map;
+
+        if (seenCharCodes.has(charCode)) {
+          continue;
         }
+        seenCharCodes.add(charCode);
+        finalMappings.push(map);
       }
 
       return {
         platformId: potentialTable.platformId,
         encodingId: potentialTable.encodingId,
-        mappings,
+        mappings: finalMappings,
         hasShortCmap,
       };
     }
@@ -2385,7 +2392,7 @@ class Font {
           } else {
             for (j = 0; j < n; j++) {
               b = data[i++];
-              stack.push((b << 8) | data[i++]);
+              stack.push(signedInt16(b, data[i++]));
             }
           }
         } else if (op === 0x2b && !tooComplexToFollowFunctions) {
@@ -2834,7 +2841,7 @@ class Font {
       data: createPostTable(properties),
     };
 
-    const charCodeToGlyphId = [];
+    const charCodeToGlyphId = Object.create(null);
 
     // Helper function to try to skip mapping of empty glyphs.
     function hasGlyph(glyphId) {
@@ -3197,7 +3204,9 @@ class Font {
       properties.seacMap = seacMap;
     }
 
-    const unitsPerEm = 1 / (properties.fontMatrix || FONT_IDENTITY_MATRIX)[0];
+    const unitsPerEm = properties.fontMatrix
+      ? 1 / Math.max(...properties.fontMatrix.slice(0, 4).map(Math.abs))
+      : 1000;
 
     const builder = new OpenTypeFileBuilder("\x4F\x54\x54\x4F");
     // PostScript Font Program
@@ -3289,7 +3298,10 @@ class Font {
     return builder.toArray();
   }
 
-  get spaceWidth() {
+  /**
+   * @private
+   */
+  get _spaceWidth() {
     // trying to estimate space character width
     const possibleSpaceReplacements = ["space", "minus", "one", "i", "I"];
     let width;
@@ -3324,7 +3336,7 @@ class Font {
         break; // the non-zero width found
       }
     }
-    return shadow(this, "spaceWidth", width || this.defaultWidth);
+    return shadow(this, "_spaceWidth", width || this.defaultWidth);
   }
 
   /**
@@ -3372,6 +3384,13 @@ class Font {
         // .notdef glyphs should be invisible in non-embedded Type1 fonts, so
         // replace them with spaces.
         fontCharCode = 0x20;
+
+        if (glyphName === "") {
+          // Ensure that other relevant glyph properties are also updated
+          // (fixes issue18059.pdf).
+          width ||= this._spaceWidth;
+          unicode = String.fromCharCode(fontCharCode);
+        }
       }
       fontCharCode = mapSpecialUnicodeValues(fontCharCode);
     }
@@ -3398,6 +3417,13 @@ class Font {
         fontChar = String.fromCodePoint(fontCharCode);
       } else {
         warn(`charToGlyph - invalid fontCharCode: ${fontCharCode}`);
+      }
+    }
+
+    if (this.missingFile && this.vertical && fontChar.length === 1) {
+      const vertical = getVerticalPresentationForm()[fontChar.charCodeAt(0)];
+      if (vertical) {
+        fontChar = unicode = String.fromCharCode(vertical);
       }
     }
 
