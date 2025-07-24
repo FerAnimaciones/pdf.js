@@ -26,6 +26,10 @@ class EditorToolbar {
 
   #altText = null;
 
+  #comment = null;
+
+  #signatureDescriptionButton = null;
+
   static #l10nRemove = null;
 
   constructor(editor) {
@@ -36,6 +40,7 @@ class EditorToolbar {
       highlight: "pdfjs-editor-remove-highlight-button",
       ink: "pdfjs-editor-remove-ink-button",
       stamp: "pdfjs-editor-remove-stamp-button",
+      signature: "pdfjs-editor-remove-signature-button",
     });
   }
 
@@ -65,8 +70,6 @@ class EditorToolbar {
         100 * position[1]
       }% + var(--editor-toolbar-vert-offset))`;
     }
-
-    this.#addDeleteButton();
 
     return editToolbar;
   }
@@ -113,9 +116,10 @@ class EditorToolbar {
   show() {
     this.#toolbar.classList.remove("hidden");
     this.#altText?.shown();
+    this.#comment?.shown();
   }
 
-  #addDeleteButton() {
+  addDeleteButton() {
     const { editorType, _uiManager } = this.#editor;
 
     const button = document.createElement("button");
@@ -142,15 +146,65 @@ class EditorToolbar {
   async addAltText(altText) {
     const button = await altText.render();
     this.#addListenersToElement(button);
-    this.#buttons.prepend(button, this.#divider);
+    this.#buttons.append(button, this.#divider);
     this.#altText = altText;
   }
 
+  addComment(comment) {
+    if (this.#comment) {
+      return;
+    }
+    const button = comment.render();
+    if (!button) {
+      return;
+    }
+    this.#addListenersToElement(button);
+    this.#buttons.prepend(button, this.#divider);
+    this.#comment = comment;
+    comment.toolbar = this;
+  }
+
   addColorPicker(colorPicker) {
+    if (this.#colorPicker) {
+      return;
+    }
     this.#colorPicker = colorPicker;
     const button = colorPicker.renderButton();
     this.#addListenersToElement(button);
-    this.#buttons.prepend(button, this.#divider);
+    this.#buttons.append(button, this.#divider);
+  }
+
+  async addEditSignatureButton(signatureManager) {
+    const button = (this.#signatureDescriptionButton =
+      await signatureManager.renderEditButton(this.#editor));
+    this.#addListenersToElement(button);
+    this.#buttons.append(button, this.#divider);
+  }
+
+  async addButton(name, tool) {
+    switch (name) {
+      case "colorPicker":
+        this.addColorPicker(tool);
+        break;
+      case "altText":
+        await this.addAltText(tool);
+        break;
+      case "editSignature":
+        await this.addEditSignatureButton(tool);
+        break;
+      case "delete":
+        this.addDeleteButton();
+        break;
+      case "comment":
+        this.addComment(tool);
+        break;
+    }
+  }
+
+  updateEditSignatureButton(description) {
+    if (this.#signatureDescriptionButton) {
+      this.#signatureDescriptionButton.title = description;
+    }
   }
 
   remove() {

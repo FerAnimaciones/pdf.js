@@ -24,6 +24,7 @@ import {
 } from "../shared/util.js";
 import {
   isNumberArray,
+  readInt16,
   readInt8,
   readUint16,
   readUint32,
@@ -35,12 +36,8 @@ import { Stream } from "./stream.js";
 
 // TODO: use DataView and its methods.
 
-function getInt16(data, offset) {
-  return ((data[offset] << 24) | (data[offset + 1] << 16)) >> 16;
-}
-
 function getFloat214(data, offset) {
-  return getInt16(data, offset) / 16384;
+  return readInt16(data, offset) / 16384;
 }
 
 function getSubroutineBias(subrs) {
@@ -170,6 +167,11 @@ function lookupCmap(ranges, unicode) {
 
 function compileGlyf(code, cmds, font) {
   function moveTo(x, y) {
+    if (firstPoint) {
+      // Close the current subpath in adding a straight line to the first point.
+      cmds.add("L", firstPoint);
+    }
+    firstPoint = [x, y];
     cmds.add("M", [x, y]);
   }
   function lineTo(x, y) {
@@ -180,8 +182,9 @@ function compileGlyf(code, cmds, font) {
   }
 
   let i = 0;
-  const numberOfContours = getInt16(code, i);
+  const numberOfContours = readInt16(code, i);
   let flags;
+  let firstPoint = null;
   let x = 0,
     y = 0;
   i += 10;
@@ -194,8 +197,8 @@ function compileGlyf(code, cmds, font) {
       let arg1, arg2;
       if (flags & 0x01) {
         if (flags & 0x02) {
-          arg1 = getInt16(code, i);
-          arg2 = getInt16(code, i + 2);
+          arg1 = readInt16(code, i);
+          arg2 = readInt16(code, i + 2);
         } else {
           arg1 = readUint16(code, i);
           arg2 = readUint16(code, i + 2);
@@ -273,7 +276,7 @@ function compileGlyf(code, cmds, font) {
     for (j = 0; j < numberOfPoints; j++) {
       switch (points[j].flags & 0x12) {
         case 0x00:
-          x += getInt16(code, i);
+          x += readInt16(code, i);
           i += 2;
           break;
         case 0x02:
@@ -288,7 +291,7 @@ function compileGlyf(code, cmds, font) {
     for (j = 0; j < numberOfPoints; j++) {
       switch (points[j].flags & 0x24) {
         case 0x00:
-          y += getInt16(code, i);
+          y += readInt16(code, i);
           i += 2;
           break;
         case 0x04:
@@ -350,6 +353,11 @@ function compileGlyf(code, cmds, font) {
 
 function compileCharString(charStringCode, cmds, font, glyphId) {
   function moveTo(x, y) {
+    if (firstPoint) {
+      // Close the current subpath in adding a straight line to the first point.
+      cmds.add("L", firstPoint);
+    }
+    firstPoint = [x, y];
     cmds.add("M", [x, y]);
   }
   function lineTo(x, y) {
@@ -363,6 +371,7 @@ function compileCharString(charStringCode, cmds, font, glyphId) {
   let x = 0,
     y = 0;
   let stems = 0;
+  let firstPoint = null;
 
   function parse(code) {
     let i = 0;
@@ -641,7 +650,7 @@ function compileCharString(charStringCode, cmds, font, glyphId) {
           }
           break;
         case 28:
-          stack.push(((code[i] << 24) | (code[i + 1] << 16)) >> 16);
+          stack.push(readInt16(code, i));
           i += 2;
           break;
         case 29: // callgsubr
@@ -736,12 +745,9 @@ class Commands {
 
   add(cmd, args) {
     if (args) {
-      const [a, b, c, d, e, f] = this.currentTransform;
+      const { currentTransform } = this;
       for (let i = 0, ii = args.length; i < ii; i += 2) {
-        const x = args[i];
-        const y = args[i + 1];
-        args[i] = a * x + c * y + e;
-        args[i + 1] = b * x + d * y + f;
+        Util.applyTransform(args, currentTransform, i);
       }
       this.cmds.push(`${cmd}${args.join(" ")}`);
     } else {
