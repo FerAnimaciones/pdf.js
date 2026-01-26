@@ -52,6 +52,7 @@ import {
   MAX_AUTO_SCALE,
   MAX_SCALE,
   MIN_SCALE,
+  PagesMapper,
   PresentationModeState,
   removeNullCharacters,
   RenderingStates,
@@ -130,6 +131,10 @@ function isValidAnnotationEditorMode(mode) {
  *   `maxCanvasDim`, it will draw a second canvas on top of the CSS-zoomed one,
  *   that only renders the part of the page that is close to the viewport.
  *   The default value is `true`.
+ * @property {boolean} [enableOptimizedPartialRendering] - When enabled, PDF
+ *   rendering will keep track of which areas of the page each PDF operation
+ *   affects. Then, when rendering a partial page (if `enableDetailCanvas` is
+ *   enabled), it will only run through the operations that affect that portion.
  * @property {IL10n} [l10n] - Localization service.
  * @property {boolean} [enablePermissions] - Enables PDF document permissions,
  *   when they exist. The default value is `false`.
@@ -254,6 +259,8 @@ class PDFViewer {
 
   #mlManager = null;
 
+  #printingAllowed = true;
+
   #scrollTimeoutId = null;
 
   #switchAnnotationEditorModeAC = null;
@@ -282,6 +289,10 @@ class PDFViewer {
 
   #viewerAlert = null;
 
+  #originalPages = null;
+
+  #pagesMapper = PagesMapper.instance;
+
   /**
    * @param {PDFViewerOptions} options
    */
@@ -293,6 +304,10 @@ class PDFViewer {
         `The API version "${version}" does not match the Viewer version "${viewerVersion}".`
       );
     }
+    if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
+      this.pagesMapper = PagesMapper.instance;
+    }
+
     this.container = options.container;
     this.viewer = options.viewer || options.container.firstElementChild;
     this.#viewerAlert = options.viewerAlert || null;
@@ -346,6 +361,8 @@ class PDFViewer {
     this.maxCanvasDim = options.maxCanvasDim;
     this.capCanvasAreaFactor = options.capCanvasAreaFactor;
     this.enableDetailCanvas = options.enableDetailCanvas ?? true;
+    this.enableOptimizedPartialRendering =
+      options.enableOptimizedPartialRendering ?? false;
     this.l10n = options.l10n;
     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
       this.l10n ||= new GenericL10n();
@@ -413,6 +430,10 @@ class PDFViewer {
       // Ensure that Fluent is connected in e.g. the COMPONENTS build.
       this.l10n.translate(this.container);
     }
+  }
+
+  get printingAllowed() {
+    return this.#printingAllowed;
   }
 
   get pagesCount() {
@@ -643,6 +664,9 @@ class PDFViewer {
       get downloadManager() {
         return self.downloadManager;
       },
+      get enableComment() {
+        return !!self.#commentManager;
+      },
       get enableScripting() {
         return !!self._scriptingManager;
       },
@@ -672,8 +696,22 @@ class PDFViewer {
       textLayerMode: this.#textLayerMode,
     };
     if (!permissions) {
+      this.#printingAllowed = true;
+      this.eventBus.dispatch("printingallowed", {
+        source: this,
+        isAllowed: this.#printingAllowed,
+      });
+
       return params;
     }
+
+    this.#printingAllowed =
+      permissions.includes(PermissionFlag.PRINT_HIGH_QUALITY) ||
+      permissions.includes(PermissionFlag.PRINT);
+    this.eventBus.dispatch("printingallowed", {
+      source: this,
+      isAllowed: this.#printingAllowed,
+    });
 
     if (
       !permissions.includes(PermissionFlag.COPY) &&
@@ -843,6 +881,10 @@ class PDFViewer {
 
       this.#annotationEditorUIManager?.destroy();
       this.#annotationEditorUIManager = null;
+
+      this.#annotationEditorMode = AnnotationEditorType.NONE;
+
+      this.#printingAllowed = true;
     }
 
     this.pdfDocument = pdfDocument;
@@ -1016,12 +1058,15 @@ class PDFViewer {
             maxCanvasDim: this.maxCanvasDim,
             capCanvasAreaFactor: this.capCanvasAreaFactor,
             enableDetailCanvas: this.enableDetailCanvas,
+            enableOptimizedPartialRendering:
+              this.enableOptimizedPartialRendering,
             pageColors,
             l10n: this.l10n,
             layerProperties: this._layerProperties,
             enableHWA: this.#enableHWA,
             enableAutoLinking: this.#enableAutoLinking,
             minDurationToUpdateCanvas: this.#minDurationToUpdateCanvas,
+            commentManager: this.#commentManager,
           });
           this._pages.push(pageView);
         }
@@ -1036,6 +1081,20 @@ class PDFViewer {
         } else if (this._spreadMode !== SpreadMode.NONE) {
           this._updateSpreadMode();
         }
+
+        eventBus._on(
+          "annotationeditorlayerrendered",
+          evt => {
+            if (this.#annotationEditorUIManager) {
+              // Ensure that the Editor buttons, in the toolbar, are updated.
+              eventBus.dispatch("annotationeditormodechanged", {
+                source: this,
+                mode: this.#annotationEditorMode,
+              });
+            }
+          },
+          { once: true, signal }
+        );
 
         // Fetch all the pages since the viewport is needed before printing
         // starts to create the correct size canvas. Wait until one page is
@@ -1053,14 +1112,6 @@ class PDFViewer {
               this.#copyCallback.bind(this, textLayerMode),
               { signal }
             );
-          }
-
-          if (this.#annotationEditorUIManager) {
-            // Ensure that the Editor buttons, in the toolbar, are updated.
-            eventBus.dispatch("annotationeditormodechanged", {
-              source: this,
-              mode: this.#annotationEditorMode,
-            });
           }
 
           // In addition to 'disableAutoFetch' being set, also attempt to reduce
@@ -1127,6 +1178,39 @@ class PDFViewer {
 
         this._pagesCapability.reject(reason);
       });
+  }
+
+  onBeforePagesEdited() {
+    this._currentPageId = this.#pagesMapper.getPageId(this._currentPageNumber);
+  }
+
+  onPagesEdited({ index, pagesToMove }) {
+    const pagesMapper = this.#pagesMapper;
+    this._currentPageNumber = pagesMapper.getPageNumber(this._currentPageId);
+
+    const viewerElement =
+      this._scrollMode === ScrollMode.PAGE ? null : this.viewer;
+    if (viewerElement) {
+      const pages = this._pages;
+      let page = pages[pagesToMove[0] - 1].div;
+      if (index === 0) {
+        pages[0].div.before(page);
+      } else {
+        pages[index - 1].div.after(page);
+      }
+      for (let i = 1, ii = pagesToMove.length; i < ii; i++) {
+        const newPage = pages[pagesToMove[i] - 1].div;
+        page.after(newPage);
+        page = newPage;
+      }
+    }
+
+    this.#originalPages ||= this._pages;
+    const newPages = (this._pages = []);
+    for (let i = 0, ii = pagesMapper.pagesNumber; i < ii; i++) {
+      const pageView = this.#originalPages[pagesMapper.getPageId(i + 1) - 1];
+      newPages.push(pageView);
+    }
   }
 
   /**
@@ -1273,11 +1357,12 @@ class PDFViewer {
 
   #scrollIntoView(pageView, pageSpot = null) {
     const { div, id } = pageView;
+    const pageNumber = this.#pagesMapper.getPageNumber(id);
 
     // Ensure that `this._currentPageNumber` is correct, when `#scrollIntoView`
     // is called directly (and not from `#resetCurrentPageView`).
-    if (this._currentPageNumber !== id) {
-      this._setCurrentPageNumber(id);
+    if (this._currentPageNumber !== pageNumber) {
+      this._setCurrentPageNumber(pageNumber);
     }
     if (this._scrollMode === ScrollMode.PAGE) {
       this.#ensurePageViewVisible();
@@ -1519,6 +1604,9 @@ class PDFViewer {
    *   The default value is `false`.
    * @property {boolean} [ignoreDestinationZoom] - Ignore the zoom argument in
    *   the destination array. The default value is `false`.
+   * @property {string} [center] - Center the view on the specified coordinates.
+   *   The default value is `null`. Possible values are: `null` (don't center),
+   *  `horizontal`, `vertical` and `both`.
    */
 
   /**
@@ -1530,6 +1618,7 @@ class PDFViewer {
     destArray = null,
     allowNegativeOffset = false,
     ignoreDestinationZoom = false,
+    center = null,
   }) {
     if (!this.pdfDocument) {
       return;
@@ -1652,7 +1741,20 @@ class PDFViewer {
     let left = Math.min(boundingRect[0][0], boundingRect[1][0]);
     let top = Math.min(boundingRect[0][1], boundingRect[1][1]);
 
-    if (!allowNegativeOffset) {
+    if (center) {
+      if (center === "both" || center === "vertical") {
+        top -=
+          (this.container.clientHeight -
+            Math.abs(boundingRect[1][1] - boundingRect[0][1])) /
+          2;
+      }
+      if (center === "both" || center === "horizontal") {
+        left -=
+          (this.container.clientWidth -
+            Math.abs(boundingRect[1][0] - boundingRect[0][0])) /
+          2;
+      }
+    } else if (!allowNegativeOffset) {
       // Some bad PDF generators will create destinations with e.g. top values
       // that exceeds the page height. Ensure that offsets are not negative,
       // to prevent a previous page from becoming visible (fixes bug 874482).
@@ -1721,7 +1823,7 @@ class PDFViewer {
       this._spreadMode === SpreadMode.NONE &&
       (this._scrollMode === ScrollMode.PAGE ||
         this._scrollMode === ScrollMode.VERTICAL);
-    const currentId = this._currentPageNumber;
+    const currentId = this.#pagesMapper.getPageId(this._currentPageNumber);
     let stillFullyVisible = false;
 
     for (const page of visiblePages) {
@@ -1734,7 +1836,9 @@ class PDFViewer {
       }
     }
     this._setCurrentPageNumber(
-      stillFullyVisible ? currentId : visiblePages[0].id
+      stillFullyVisible
+        ? this._currentPageNumber
+        : this.#pagesMapper.getPageNumber(visiblePages[0].id)
     );
 
     this._updateLocation(visible.first);
@@ -2442,6 +2546,7 @@ class PDFViewer {
       await this.#annotationEditorUIManager.updateMode(
         mode,
         editId,
+        /* isFromUser = */ true,
         isFromKeyboard,
         mustEnterInEditMode,
         editComment
@@ -2467,6 +2572,8 @@ class PDFViewer {
       if (!isEditing) {
         this.pdfDocument.annotationStorage.resetModifiedIds();
       }
+      // We need to cleanup whatever pages being rendered.
+      this.cleanup();
       for (const pageView of this._pages) {
         pageView.toggleEditingMode(isEditing);
       }

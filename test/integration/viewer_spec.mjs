@@ -17,6 +17,7 @@ import {
   awaitPromise,
   closePages,
   createPromise,
+  getRect,
   getSpanRectFromText,
   loadAndWait,
   scrollIntoView,
@@ -363,12 +364,12 @@ describe("PDF viewer", () => {
               .toBeLessThan(originalCanvasSize * factor ** 2);
 
             expect(canvasSize)
-              .withContext(`In ${browserName}, <= MAX_CANVAS_PIXELS`)
-              .toBeLessThanOrEqual(MAX_CANVAS_PIXELS.get(browserName));
+              .withContext(`In ${browserName}, <= MAX_CANVAS_PIXELS / 4`)
+              .toBeLessThanOrEqual(MAX_CANVAS_PIXELS.get(browserName) / 4);
 
             expect(canvasSize)
-              .withContext(`In ${browserName}, > MAX_CANVAS_PIXELS * 0.99`)
-              .toBeGreaterThan(MAX_CANVAS_PIXELS.get(browserName) * 0.99);
+              .withContext(`In ${browserName}, > MAX_CANVAS_PIXELS / 4 * 0.95`)
+              .toBeGreaterThan((MAX_CANVAS_PIXELS.get(browserName) / 4) * 0.95);
           })
         );
       });
@@ -565,10 +566,10 @@ describe("PDF viewer", () => {
                 .toBe(2);
               expect(after[0].width)
                 .withContext(`In ${browserName}`)
-                .toBe(582 * pixelRatio);
+                .toBe(Math.floor(291 * pixelRatio));
               expect(after[0].height)
                 .withContext(`In ${browserName}`)
-                .toBe(823 * pixelRatio);
+                .toBe(Math.floor(411.5 * pixelRatio));
 
               // The dimensions of the detail canvas are capped to 800x600 but
               // it depends on the visible area which depends itself of the
@@ -1259,6 +1260,40 @@ describe("PDF viewer", () => {
     });
   });
 
+  describe("File param with encoded characters (issue 20420)", () => {
+    let pages;
+
+    beforeEach(async () => {
+      const baseURL = new URL(global.integrationBaseUrl);
+      const url = `${baseURL.origin}/build/generic/web/compressed.tracemonkey-pldi-09.pdf?token=%2Ffoo`;
+      pages = await loadAndWait(
+        encodeURIComponent(url),
+        ".textLayer .endOfContent"
+      );
+    });
+
+    afterEach(async () => {
+      await closePages(pages);
+    });
+
+    it("must not double-decode the file param", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          const pdfUrl = await page.evaluate(
+            () => window.PDFViewerApplication.url
+          );
+
+          expect(pdfUrl)
+            .withContext(`In ${browserName}`)
+            .toContain("token=%2Ffoo");
+          expect(pdfUrl)
+            .withContext(`In ${browserName}`)
+            .not.toContain("token=/foo");
+        })
+      );
+    });
+  });
+
   describe("Keyboard scrolling on startup (bug 843653)", () => {
     let pages;
 
@@ -1298,6 +1333,166 @@ describe("PDF viewer", () => {
             viewer => viewer.currentPageNumber
           );
           expect(currentPageNumber).withContext(`In ${browserName}`).toBe(2);
+        })
+      );
+    });
+  });
+
+  describe("Printing can be disallowed for some pdfs (bug 1978985)", () => {
+    let pages;
+
+    beforeEach(async () => {
+      pages = await loadAndWait(
+        "print_protection.pdf",
+        "#passwordDialog",
+        null,
+        null,
+        { enablePermissions: true }
+      );
+    });
+
+    afterEach(async () => {
+      await closePages(pages);
+    });
+
+    it("must check that printing is disallowed", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          await page.waitForSelector("#printButton", {
+            visible: true,
+          });
+
+          const selector = "#passwordDialog input#password";
+          await page.waitForSelector(selector, { visible: true });
+          await page.type(selector, "1234");
+          await page.click("#passwordDialog button#passwordSubmit");
+
+          await page.waitForSelector(".textLayer .endOfContent");
+
+          // The print button should be hidden.
+          await page.waitForSelector("#printButton", {
+            hidden: true,
+          });
+          await page.waitForSelector("#secondaryPrint", {
+            hidden: true,
+          });
+
+          const hasThrown = await page.evaluate(() => {
+            try {
+              window.print();
+            } catch {
+              return true;
+            }
+            return false;
+          });
+          expect(hasThrown).withContext(`In ${browserName}`).toBeTrue();
+        })
+      );
+    });
+  });
+
+  describe("Pinch-zoom", () => {
+    let pages;
+
+    beforeEach(async () => {
+      pages = await loadAndWait(
+        "tracemonkey.pdf",
+        `.page[data-page-number = "1"] .endOfContent`
+      );
+    });
+
+    it("keeps the content under the pinch centre fixed on the screen", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          if (browserName === "firefox") {
+            pending(
+              "Touch events are not supported on devices without touch screen in Firefox."
+            );
+          }
+          if (browserName === "chrome") {
+            pending(
+              "Pinch zoom emulation is not supported for WebDriver BiDi in Chrome."
+            );
+          }
+
+          const rect = await getSpanRectFromText(page, 1, "type-stable");
+          const originX = rect.x + rect.width / 2;
+          const originY = rect.y + rect.height / 2;
+          const rendered = await createPromise(page, resolve => {
+            const cb = e => {
+              if (e.pageNumber === 1) {
+                window.PDFViewerApplication.eventBus.off(
+                  "textlayerrendered",
+                  cb
+                );
+                resolve();
+              }
+            };
+            window.PDFViewerApplication.eventBus.on("textlayerrendered", cb);
+          });
+          const client = await page.target().createCDPSession();
+          await client.send("Input.synthesizePinchGesture", {
+            x: originX,
+            y: originY,
+            scaleFactor: 3,
+            gestureSourceType: "touch",
+          });
+          await awaitPromise(rendered);
+          const spanHandle = await page.evaluateHandle(() =>
+            Array.from(
+              document.querySelectorAll(
+                '.page[data-page-number="1"] .textLayer span'
+              )
+            ).find(span => span.textContent.includes("type-stable"))
+          );
+          expect(await spanHandle.isIntersectingViewport()).toBeTrue();
+        })
+      );
+    });
+  });
+
+  describe("Scroll into view", () => {
+    let pages;
+
+    beforeEach(async () => {
+      pages = await loadAndWait(
+        "tracemonkey_annotation_on_page_8.pdf",
+        `.page[data-page-number = "1"] .endOfContent`
+      );
+    });
+
+    it("Check that the top right corner of the annotation is centered vertically", async () => {
+      await Promise.all(
+        pages.map(async ([browserName, page]) => {
+          const handle = await page.evaluateHandle(() => [
+            new Promise(resolve => {
+              const container = document.getElementById("viewerContainer");
+              container.addEventListener("scrollend", resolve, {
+                once: true,
+              });
+              window.PDFViewerApplication.pdfLinkService.goToXY(
+                8,
+                43.55,
+                198.36,
+                {
+                  center: "vertical",
+                }
+              );
+            }),
+          ]);
+          await awaitPromise(handle);
+          const annotationSelector =
+            ".page[data-page-number='8'] .stampAnnotation";
+          await page.waitForSelector(annotationSelector, { visible: true });
+          const rect = await getRect(page, annotationSelector);
+          const containerRect = await getRect(page, "#viewerContainer");
+          expect(
+            Math.abs(
+              2 * (Math.ceil(rect.y) - containerRect.y) - containerRect.height
+            )
+          )
+            .withContext(`In ${browserName}`)
+            .toBeLessThanOrEqual(1);
         })
       );
     });

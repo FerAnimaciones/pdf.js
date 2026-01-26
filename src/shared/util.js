@@ -75,6 +75,7 @@ const AnnotationEditorType = {
   HIGHLIGHT: 9,
   STAMP: 13,
   INK: 15,
+  POPUP: 16,
   SIGNATURE: 101,
   COMMENT: 102,
 };
@@ -105,6 +106,12 @@ const PermissionFlag = {
   COPY_FOR_ACCESSIBILITY: 0x200,
   ASSEMBLE: 0x400,
   PRINT_HIGH_QUALITY: 0x800,
+};
+
+const MeshFigureType = {
+  TRIANGLES: 1,
+  LATTICE: 2,
+  PATCH: 3,
 };
 
 const TextRenderingMode = {
@@ -347,7 +354,8 @@ const DrawOPS = {
   moveTo: 0,
   lineTo: 1,
   curveTo: 2,
-  closePath: 3,
+  quadraticCurveTo: 3,
+  closePath: 4,
 };
 
 const PasswordResponses = {
@@ -373,7 +381,7 @@ function getVerbosityLevel() {
 function info(msg) {
   if (verbosity >= VerbosityLevel.INFOS) {
     // eslint-disable-next-line no-console
-    console.log(`Info: ${msg}`);
+    console.info(`Info: ${msg}`);
   }
 }
 
@@ -381,7 +389,7 @@ function info(msg) {
 function warn(msg) {
   if (verbosity >= VerbosityLevel.WARNINGS) {
     // eslint-disable-next-line no-console
-    console.log(`Warning: ${msg}`);
+    console.warn(`Warning: ${msg}`);
   }
 }
 
@@ -642,6 +650,23 @@ class FeatureTest {
     );
   }
 
+  static get isFloat16ArraySupported() {
+    return shadow(
+      this,
+      "isFloat16ArraySupported",
+      typeof Float16Array !== "undefined"
+    );
+  }
+
+  static get isSanitizerSupported() {
+    return shadow(
+      this,
+      "isSanitizerSupported",
+      // eslint-disable-next-line no-undef
+      typeof Sanitizer !== "undefined"
+    );
+  }
+
   static get platform() {
     const { platform, userAgent } = navigator;
 
@@ -672,6 +697,10 @@ const hexNumbers = Array.from(Array(256).keys(), n =>
 class Util {
   static makeHexColor(r, g, b) {
     return `#${hexNumbers[r]}${hexNumbers[g]}${hexNumbers[b]}`;
+  }
+
+  static domMatrixToTransform(dm) {
+    return [dm.a, dm.b, dm.c, dm.d, dm.e, dm.f];
   }
 
   // Apply a scaling matrix to some min/max values.
@@ -734,6 +763,18 @@ class Util {
       m1[1] * m2[2] + m1[3] * m2[3],
       m1[0] * m2[4] + m1[2] * m2[5] + m1[4],
       m1[1] * m2[4] + m1[3] * m2[5] + m1[5],
+    ];
+  }
+
+  // Multiplies m (an array-based transform) by md (a DOMMatrix transform).
+  static multiplyByDOMMatrix(m, md) {
+    return [
+      m[0] * md.a + m[2] * md.b,
+      m[1] * md.a + m[3] * md.b,
+      m[0] * md.c + m[2] * md.d,
+      m[1] * md.c + m[3] * md.d,
+      m[0] * md.e + m[2] * md.f + m[4],
+      m[1] * md.e + m[3] * md.f + m[5],
     ];
   }
 
@@ -1310,6 +1351,7 @@ export {
   LINE_DESCENT_FACTOR,
   LINE_FACTOR,
   MathClamp,
+  MeshFigureType,
   normalizeUnicode,
   objectSize,
   OPS,

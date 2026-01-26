@@ -96,7 +96,7 @@ const AUTOPREFIXER_CONFIG = {
 const BABEL_TARGETS = ENV_TARGETS.join(", ");
 
 const BABEL_PRESET_ENV_OPTS = Object.freeze({
-  corejs: "3.44.0",
+  corejs: "3.47.0",
   exclude: ["web.structured-clone"],
   shippedProposals: true,
   useBuiltIns: "usage",
@@ -211,13 +211,13 @@ function createWebpackAlias(defines) {
     "web-pdf_layer_viewer": "web/pdf_layer_viewer.js",
     "web-pdf_outline_viewer": "web/pdf_outline_viewer.js",
     "web-pdf_presentation_mode": "web/pdf_presentation_mode.js",
-    "web-pdf_sidebar": "web/pdf_sidebar.js",
     "web-pdf_thumbnail_viewer": "web/pdf_thumbnail_viewer.js",
     "web-preferences": "",
     "web-print_service": "",
     "web-secondary_toolbar": "web/secondary_toolbar.js",
     "web-signature_manager": "web/signature_manager.js",
     "web-toolbar": "web/toolbar.js",
+    "web-views_manager": "web/views_manager.js",
   };
 
   if (defines.CHROME) {
@@ -696,6 +696,10 @@ function createWasmBundle() {
       base: "external/qcms",
       encoding: false,
     }),
+    gulp.src(["external/jbig2/*.wasm", "external/jbig2/LICENSE_*"], {
+      base: "external/jbig2",
+      encoding: false,
+    }),
   ]);
 }
 
@@ -1058,9 +1062,8 @@ gulp.task("cmaps", async function () {
     }
   });
 
-  const { compressCmaps } = await import(
-    "./external/cmapscompress/compress.mjs"
-  );
+  const { compressCmaps } =
+    await import("./external/cmapscompress/compress.mjs");
   compressCmaps(CMAP_INPUT, VIEWER_CMAP_OUTPUT, true);
 });
 
@@ -1200,15 +1203,7 @@ gulp.task(
 function buildComponents(defines, dir) {
   fs.rmSync(dir, { recursive: true, force: true });
 
-  const COMPONENTS_IMAGES = [
-    "web/images/annotation-*.svg",
-    "web/images/loading-icon.gif",
-    "web/images/altText_*.svg",
-    "web/images/editor-toolbar-*.svg",
-    "web/images/messageBar_*.svg",
-    "web/images/toolbarButton-{editorHighlight,menuArrow}.svg",
-    "web/images/cursor-*.svg",
-  ];
+  const COMPONENTS_IMAGES = ["web/images/*.svg", "web/images/*.gif"];
 
   return ordered([
     createComponentsBundle(defines).pipe(gulp.dest(dir)),
@@ -1696,6 +1691,7 @@ function buildLib(defines, dir) {
     gulp.src("test/unit/*.js", { base: ".", encoding: false }),
     gulp.src("external/openjpeg/*.js", { base: "openjpeg/", encoding: false }),
     gulp.src("external/qcms/*.js", { base: "qcms/", encoding: false }),
+    gulp.src("external/jbig2/*.js", { base: "jbig2/", encoding: false }),
   ]);
 
   return buildLibHelper(bundleDefines, inputStream, dir);
@@ -2022,7 +2018,7 @@ gulp.task(
 
 gulp.task("lint", function (done) {
   console.log();
-  console.log("### Linting JS/CSS/JSON/SVG files");
+  console.log("### Linting JS/CSS/JSON/SVG/HTML files");
 
   // Ensure that we lint the Firefox specific *.jsm files too.
   const esLintOptions = [
@@ -2046,9 +2042,10 @@ gulp.task("lint", function (done) {
   const prettierOptions = [
     "node_modules/prettier/bin/prettier.cjs",
     "**/*.json",
+    "**/*.html",
   ];
   if (process.argv.includes("--fix")) {
-    prettierOptions.push("--log-level", "silent", "--write");
+    prettierOptions.push("--log-level", "error", "--write");
   } else {
     prettierOptions.push("--log-level", "warn", "--check");
   }
@@ -2097,6 +2094,35 @@ gulp.task("lint", function (done) {
     });
   });
 });
+
+gulp.task(
+  "lint-mozcentral",
+  gulp.series("mozcentral", function runLintMozcentral(done) {
+    console.log();
+    console.log("### Checking mozilla-central files");
+
+    const styleLintOptions = [
+      "../../node_modules/stylelint/bin/stylelint.mjs",
+      "**/*.css",
+      "--report-needless-disables",
+      "--config",
+      "../../stylelint-mozcentral.json",
+    ];
+
+    const styleLintProcess = startNode(styleLintOptions, {
+      stdio: "inherit",
+      cwd: BUILD_DIR + "mozcentral/",
+    });
+    styleLintProcess.on("close", function (styleLintCode) {
+      if (styleLintCode !== 0) {
+        done(new Error("Stylelint failed."));
+        return;
+      }
+      console.log("files checked, no errors found");
+      done();
+    });
+  })
+);
 
 gulp.task(
   "lint-chromium",
@@ -2177,7 +2203,7 @@ gulp.task(
     },
     function watchWasm() {
       gulp.watch(
-        ["external/openjpeg/*", "external/qcms/*"],
+        ["external/openjpeg/*", "external/qcms/*", "external/jbig2/*"],
         { ignoreInitial: false },
         gulp.series("dev-wasm")
       );
@@ -2339,7 +2365,7 @@ function packageJson() {
     bugs: DIST_BUGS_URL,
     license: DIST_LICENSE,
     optionalDependencies: {
-      "@napi-rs/canvas": "^0.1.74",
+      "@napi-rs/canvas": "^0.1.88",
     },
     browser: {
       canvas: false,

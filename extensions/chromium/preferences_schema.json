@@ -71,7 +71,15 @@
       "type": "string",
       "default": ""
     },
+    "commentLearnMoreUrl": {
+      "type": "string",
+      "default": ""
+    },
     "enableSignatureEditor": {
+      "type": "boolean",
+      "default": false
+    },
+    "enableSplitMerge": {
       "type": "boolean",
       "default": false
     },
@@ -236,6 +244,11 @@
     },
     "enableComment": {
       "description": "Enable creation of comment annotations.",
+      "type": "boolean",
+      "default": false
+    },
+    "enableOptimizedPartialRendering": {
+      "description": "Enable tracking of PDF operations to optimize partial rendering.",
       "type": "boolean",
       "default": false
     }

@@ -17,7 +17,11 @@
 /** @typedef {import("./event_utils").EventBus} EventBus */
 /** @typedef {import("./interfaces").IPDFLinkService} IPDFLinkService */
 
-import { binarySearchFirstItem, scrollIntoView } from "./ui_utils.js";
+import {
+  binarySearchFirstItem,
+  PagesMapper,
+  scrollIntoView,
+} from "./ui_utils.js";
 import { getCharacterType, getNormalizeWithNFKC } from "./pdf_find_utils.js";
 
 const FindState = {
@@ -29,7 +33,6 @@ const FindState = {
 
 const FIND_TIMEOUT = 250; // ms
 const MATCH_SCROLL_OFFSET_TOP = -50; // px
-const MATCH_SCROLL_OFFSET_LEFT = -400; // px
 
 const CHARACTERS_TO_NORMALIZE = {
   "\u2010": "-", // Hyphen
@@ -78,8 +81,7 @@ const DIACRITICS_EXCEPTION = new Set([
 let DIACRITICS_EXCEPTION_STR; // Lazily initialized, see below.
 
 const DIACRITICS_REG_EXP = /\p{M}+/gu;
-const SPECIAL_CHARS_REG_EXP =
-  /([.*+?^${}()|[\]\\])|(\p{P})|(\s+)|(\p{M})|(\p{L})/gu;
+const SPECIAL_CHARS_REG_EXP = /([+^$|])|(\p{P}+)|(\s+)|(\p{M})|(\p{L})/gu;
 const NOT_DIACRITIC_FROM_END_REG_EXP = /([^\p{M}])\p{M}*$/u;
 const NOT_DIACRITIC_FROM_START_REG_EXP = /^\p{M}*([^\p{M}])/u;
 
@@ -424,6 +426,8 @@ class PDFFindController {
 
   #visitedPagesCount = 0;
 
+  #pagesMapper = PagesMapper.instance;
+
   /**
    * @param {PDFFindControllerOptions} options
    */
@@ -441,6 +445,7 @@ class PDFFindController {
     this.#reset();
     eventBus._on("find", this.#onFind.bind(this));
     eventBus._on("findbarclose", this.#onFindBarClose.bind(this));
+    eventBus._on("pagesedited", this.#onPagesEdited.bind(this));
   }
 
   get highlightMatches() {
@@ -573,10 +578,9 @@ class PDFFindController {
       return;
     }
     this._scrollMatches = false; // Ensure that scrolling only happens once.
-
     const spot = {
       top: MATCH_SCROLL_OFFSET_TOP,
-      left: selectedLeft + MATCH_SCROLL_OFFSET_LEFT,
+      left: selectedLeft,
     };
     scrollIntoView(element, spot, /* scrollMatches = */ true);
   }
@@ -710,6 +714,18 @@ class PDFFindController {
   #convertToRegExpString(query, hasDiacritics) {
     const { matchDiacritics } = this.#state;
     let isUnicode = false;
+    const addExtraWhitespaces = (original, fixed) => {
+      if (original === query) {
+        return fixed;
+      }
+      if (query.startsWith(original)) {
+        return `${fixed}[ ]*`;
+      }
+      if (query.endsWith(original)) {
+        return `[ ]*${fixed}`;
+      }
+      return `[ ]*${fixed}[ ]*`;
+    };
     query = query.replaceAll(
       SPECIAL_CHARS_REG_EXP,
       (
@@ -725,11 +741,11 @@ class PDFFindController {
 
         if (p1) {
           // Escape characters like *+?... to not interfere with regexp syntax.
-          return `[ ]*\\${p1}[ ]*`;
+          return addExtraWhitespaces(p1, RegExp.escape(p1));
         }
         if (p2) {
-          // Allow whitespaces around punctuation signs.
-          return `[ ]*${p2}[ ]*`;
+          // Allow whitespaces around group of punctuation signs.
+          return addExtraWhitespaces(p2, RegExp.escape(p2));
         }
         if (p3) {
           // Replace spaces by \s+ to be sure to match any spaces.
@@ -785,12 +801,13 @@ class PDFFindController {
     if (query.length === 0) {
       return; // Do nothing: the matches should be wiped out already.
     }
-    const pageContent = this._pageContents[pageIndex];
+    const pageId = this.getPageId(pageIndex);
+    const pageContent = this._pageContents[pageId];
     const matcherResult = this.match(query, pageContent, pageIndex);
 
     const matches = (this._pageMatches[pageIndex] = []);
     const matchesLength = (this._pageMatchesLength[pageIndex] = []);
-    const diffs = this._pageDiffs[pageIndex];
+    const diffs = this._pageDiffs[pageId];
 
     matcherResult?.forEach(({ index, length }) => {
       const [matchPos, matchLen] = getOriginalIndex(diffs, index, length);
@@ -839,7 +856,7 @@ class PDFFindController {
    *   page.
    */
   match(query, pageContent, pageIndex) {
-    const hasDiacritics = this._hasDiacritics[pageIndex];
+    const hasDiacritics = this._hasDiacritics[this.getPageId(pageIndex)];
 
     let isUnicode = false;
     if (typeof query === "string") {
@@ -940,6 +957,14 @@ class PDFFindController {
     }
   }
 
+  getPageNumber(idx) {
+    return this.#pagesMapper.getPageNumber(idx + 1) - 1;
+  }
+
+  getPageId(pageNumber) {
+    return this.#pagesMapper.getPageId(pageNumber + 1) - 1;
+  }
+
   #updatePage(index) {
     if (this._scrollMatches && this._selected.pageIdx === index) {
       // If the page is selected, scroll the page into view, which triggers
@@ -951,6 +976,7 @@ class PDFFindController {
     this._eventBus.dispatch("updatetextlayermatches", {
       source: this,
       pageIndex: index,
+      pageId: this.getPageId(index),
     });
   }
 
@@ -958,6 +984,7 @@ class PDFFindController {
     this._eventBus.dispatch("updatetextlayermatches", {
       source: this,
       pageIndex: -1,
+      pageId: -1,
     });
   }
 
@@ -989,7 +1016,7 @@ class PDFFindController {
           continue;
         }
         this._pendingFindMatches.add(i);
-        this._extractTextPromises[i].then(() => {
+        this._extractTextPromises[this.getPageId(i)].then(() => {
           this._pendingFindMatches.delete(i);
           this.#calculateMatch(i);
         });
@@ -1115,6 +1142,14 @@ class PDFFindController {
 
       this.#updatePage(this._selected.pageIdx);
     }
+  }
+
+  #onPagesEdited() {
+    if (this._extractTextPromises.length === 0) {
+      return;
+    }
+    this.#onFindBarClose();
+    this._dirtyMatch = true;
   }
 
   #onFindBarClose(evt) {
